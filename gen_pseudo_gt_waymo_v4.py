@@ -6,7 +6,7 @@ import pandas as pd
 import argparse
 import os
 from scipy.spatial.transform import Rotation as R
-from utils.utils import dbscan, get_obj,translate_boxes_to_open3d_instance, translate_boxes_to_open3d_gtbox
+from utils.utils import dbscan, get_obj,translate_boxes_to_open3d_instance, translate_boxes_to_open3d_gtbox, dbscan_max_cluster
 from utils.registration_utils import full_registration
 from utils.open3d_utils import set_black_background, set_white_background
 
@@ -30,14 +30,25 @@ def main(args):
     pcd_id_list = list()
     idx_range = range(args.rgs_start_idx, args.rgs_end_idx+1)
     src_gt_bbox  = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','annotations',f'{str(args.src_frame_idx).zfill(6)}.bin')).reshape(-1, 7) 
+
+    speed_list = dict()
+    estimated_position_list = dict()
+    previous_position = dict()
+    same_id_dict = dict()
+    appeared_id = list()
    
     for frame_idx in idx_range:
         pcd_with_instance_id = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4)
         pcd_color = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3]
         pcd = pcd_with_instance_id[:, :3]
         pcd_id = pcd_with_instance_id[:, 3]
-        
-        
+
+        ####################### id merge ############################
+        if args.id_merge_with_speed:
+            for i in range(len(pcd_id)):
+                while pcd_id[i] in same_id_dict.keys():
+                    pcd_id[i] = same_id_dict[pcd_id[i]]
+        ####################### id merge ############################
         
         ####################### dbscan before registration ############################
         src = open3d.geometry.PointCloud()
@@ -46,7 +57,7 @@ def main(args):
         
         if args.vis:
             print(f"frame{frame_idx}'s point_cloud before dbscan")
-            o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD],{ord("B"): set_black_background, ord("W"): set_white_background })
+            # o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD],{ord("B"): set_black_background, ord("W"): set_white_background })
         
         if args.perform_db_scan_before_registration:        
             un_noise_idx = dbscan(src, pcd_id, eps=0.8, min_points= 50)
@@ -69,6 +80,65 @@ def main(args):
             # src_down = src.voxel_down_sample(voxel_size)
             src_list.append(src)
         ####################### dbscan before registration ############################
+
+        ####################### position estimation ############################
+        if args.id_merge_with_speed:
+
+            # estimate position based on speed and previous position
+            new_estimated_position = dict()
+            for i in estimated_position_list.keys():
+                if new_speed_list.get(i) is not None:
+                    new_estimated_position[i] = estimated_position_list[i] + speed_list[i]
+            estimated_position_list = new_estimated_position
+
+            new_previous_position = dict()
+            new_speed_list = dict()
+            new_estimated_position_list = dict()
+
+            for i in range(np.unique(pcd_id).shape[0]):
+                instance_id = np.unique(pcd_id)[i]
+                if instance_id in []
+                # get center position of the instance point cloud
+                mask = np.where(pcd_id == instance_id)
+                position = np.mean(pcd[mask], axis=0)
+                # if any estimated position is close enough to the current position, merge the id
+                if appeared_id.count(instance_id) == 0:
+                    for j in estimated_position_list.keys():
+                        if not j in pcd_id and np.linalg.norm(position - estimated_position_list[j]) < args.position_diff_threshold:
+                            same_id_dict[instance_id] = j
+                            pcd_id[mask] = j
+                            instance_id = j
+                            break
+                # update lists
+                if previous_position.get(instance_id) is not None:
+                    if speed_list.get(instance_id) is not None:
+                        new_speed_list[instance_id] = (position - previous_position[instance_id]) * args.speed_momentum + (1 - args.speed_momentum) * speed_list[instance_id]
+                    else:
+                        new_speed_list[instance_id] = position - previous_position[instance_id]
+                new_previous_position[instance_id] = position
+                new_estimated_position_list[instance_id] = position
+                if not instance_id in appeared_id:
+                    appeared_id.append(instance_id)
+
+            tmp = new_estimated_position_list
+            for i in estimated_position_list.keys():
+                if tmp.get(i) is None:
+                    tmp[i] = estimated_position_list[i]
+            estimated_position_list = tmp
+
+            tmp = new_speed_list
+            for i in speed_list.keys():
+                if tmp.get(i) is None:
+                    tmp[i] = speed_list[i]
+            speed_list = tmp
+            previous_position = new_previous_position
+
+    
+    #print estimated corresponding position
+    if args.id_merge_with_speed and args.vis:
+        for i in same_id_dict.keys():
+            print(f"instance {i} is merged with {same_id_dict[i]}")
+        ####################### position estimation ############################
     
     
     
@@ -151,7 +221,11 @@ def main(args):
                 print(f"instnace_id:{idx_instance} before dbscan")
                 o3d.visualization.draw_geometries_with_key_callbacks([single_instance_src, AXIS_PCD],{ord("B"): set_black_background, ord("W"): set_white_background })
 
-            un_noise_idx = dbscan(single_instance_src, None, eps = 0.5, min_points=100)
+            if args.dbscan_max_cluster:
+                un_noise_idx = dbscan_max_cluster(single_instance_src, None, eps = 0.5, min_points=100)
+            else:
+                un_noise_idx = dbscan(single_instance_src, None, eps = 0.5, min_points=100)
+
             masked_pcd_id = single_instance_pcd_id[un_noise_idx]
             masked_pcd_color = single_instance_pcd_color[un_noise_idx]
             masked_pcd = single_instance_pcd[un_noise_idx]
@@ -162,6 +236,7 @@ def main(args):
                 single_instance_after_db_scan_src.colors = open3d.utility.Vector3dVector(masked_pcd_color)                
                 print(f"instnace_id:{idx_instance} after dbscan")
                 o3d.visualization.draw_geometries_with_key_callbacks([single_instance_after_db_scan_src, AXIS_PCD],{ord("B"): set_black_background, ord("W"): set_white_background })
+                print(f"masked_pcd_size:{len(masked_pcd)}")
             
             
             
@@ -241,7 +316,7 @@ def main(args):
             if args.vis:
                 # o3d.visualization.draw_geometries_with_key_callbacks([src, line_set, AXIS_PCD], {ord("B"): set_black_background, ord("W"): set_white_background }) ### camera coords
                 print(f"bounding box for instance :{idx_instance}")
-                o3d.visualization.draw_geometries_with_key_callbacks([ src_lidar, lidar_lineset,box_scaled, AXIS_PCD], {ord("B"): set_black_background, ord("W"): set_white_background }) ### lidar coords
+                # o3d.visualization.draw_geometries_with_key_callbacks([ src_lidar, lidar_lineset,box_scaled, AXIS_PCD], {ord("B"): set_black_background, ord("W"): set_white_background }) ### lidar coords
             ############################################################
 
         if src_gt_bbox is not None:
@@ -347,6 +422,11 @@ if __name__ == "__main__":
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=True)
     parser.add_argument('--bbox_gen_fit_method', type=str, default='closeness_to_edge')
+
+    parser.add_argument('--dbscan_max_cluster', type=bool, default=False)
+    parser.add_argument('--id_merge_with_speed', type=bool, default=False)
+    parser.add_argument('--position_diff_threshold', type=float, default=0.5)
+    parser.add_argument('--speed_momentum', type=float, default=0.8)
     
 
     args = parser.parse_args()
