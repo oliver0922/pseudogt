@@ -94,7 +94,6 @@ def main(args):
                 # if any estimated position is close enough to the current position, merge the id
                 if appeared_id.count(instance_id) == 0:
                     for j in estimated_position_list.keys():
-                        print(f"distance between {instance_id} and {j} is {np.linalg.norm(position - estimated_position_list[j])}")
                         if not j in pcd_id and np.linalg.norm(position - estimated_position_list[j]) < args.position_diff_threshold:
                             same_id_dict[instance_id] = j
                             pcd_id[mask] = j
