@@ -103,6 +103,8 @@ def main(args):
                 # if any estimated position is close enough to the current position, merge the id
                 if appeared_id.count(instance_id) == 0:
                     for j in estimated_position_list.keys():
+                        if instance_id in [12, 26, 29]:
+                            print(f"distance between {instance_id} and {j} is {np.linalg.norm(position - estimated_position_list[j])}")
                         if not j in pcd_id and np.linalg.norm(position - estimated_position_list[j]) < args.position_diff_threshold:
                             same_id_dict[instance_id] = j
                             pcd_id[mask] = j
@@ -137,6 +139,8 @@ def main(args):
     if args.id_merge_with_speed and args.vis:
         for i in same_id_dict.keys():
             print(f"instance {i} is merged with {same_id_dict[i]}")
+        for i in appeared_id:
+            print(f"instance {i} has appeared")
         ####################### position estimation ############################
     
     
@@ -424,7 +428,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--dbscan_max_cluster', type=bool, default=False)
     parser.add_argument('--id_merge_with_speed', type=bool, default=False)
-    parser.add_argument('--position_diff_threshold', type=float, default=0.5)
+    parser.add_argument('--position_diff_threshold', type=float, default=2.0)
     parser.add_argument('--speed_momentum', type=float, default=0.8)
     
 
