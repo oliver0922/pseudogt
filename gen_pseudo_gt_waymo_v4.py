@@ -42,13 +42,6 @@ def main(args):
         pcd_color = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3]
         pcd = pcd_with_instance_id[:, :3]
         pcd_id = pcd_with_instance_id[:, 3]
-
-        ####################### id merge ############################
-        if args.id_merge_with_speed:
-            for i in range(len(pcd_id)):
-                while pcd_id[i] in same_id_dict.keys():
-                    pcd_id[i] = same_id_dict[pcd_id[i]]
-        ####################### id merge ############################
         
         ####################### dbscan before registration ############################
         src = open3d.geometry.PointCloud()
@@ -62,7 +55,6 @@ def main(args):
         if args.perform_db_scan_before_registration:        
             un_noise_idx = dbscan(src, pcd_id, eps=0.8, min_points= 50)
             pcd_id = pcd_id[un_noise_idx]
-            pcd_id_list.append(pcd_id)
             masked_pcd_color = pcd_color[un_noise_idx]
             masked_pcd = pcd[un_noise_idx]
             src = open3d.geometry.PointCloud()
@@ -71,14 +63,7 @@ def main(args):
             if args.vis:
                 print(f"frame{frame_idx}'s point_cloud after dbscan")
                 # o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD],{ord("B"): set_black_background, ord("W"): set_white_background })
-            src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-            src_list.append(src)
-        
-        else:    
-            pcd_id_list.append(pcd_id)
-            src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-            # src_down = src.voxel_down_sample(voxel_size)
-            src_list.append(src)
+
         ####################### dbscan before registration ############################
 
         ####################### position estimation ############################
@@ -132,14 +117,20 @@ def main(args):
             speed_list = tmp
             previous_position = new_previous_position
 
-    
-    #print estimated corresponding position
+            for i in range(len(pcd_id)):
+                while pcd_id[i] in same_id_dict.keys():
+                    pcd_id[i] = same_id_dict[pcd_id[i]]
+
+        ####################### position estimation ############################
+
+        pcd_id_list.append(pcd_id)
+        src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        src_list.append(src)
+
     if args.id_merge_with_speed and args.vis:
         for i in same_id_dict.keys():
             print(f"instance {i} is merged with {same_id_dict[i]}")
-        ####################### position estimation ############################
-    
-    
+        
     
     
     ####################### registration ############################
