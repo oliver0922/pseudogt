@@ -97,7 +97,6 @@ def main(args):
 
             for i in range(np.unique(pcd_id).shape[0]):
                 instance_id = np.unique(pcd_id)[i]
-                if instance_id in []
                 # get center position of the instance point cloud
                 mask = np.where(pcd_id == instance_id)
                 position = np.mean(pcd[mask], axis=0)
