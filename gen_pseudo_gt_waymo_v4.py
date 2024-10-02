@@ -43,6 +43,13 @@ def main(args):
         pcd = pcd_with_instance_id[:, :3]
         pcd_id = pcd_with_instance_id[:, 3]
         
+        ####################### id merge with position estimation ############################
+        if args.id_merge_with_speed:
+            for i in range(len(pcd_id)):
+                while pcd_id[i] in same_id_dict.keys():
+                    pcd_id[i] = same_id_dict[pcd_id[i]]
+        ####################### id merge with position estimation ############################
+
         ####################### dbscan before registration ############################
         src = open3d.geometry.PointCloud()
         src.points = open3d.utility.Vector3dVector(pcd)
@@ -66,14 +73,13 @@ def main(args):
 
         ####################### dbscan before registration ############################
 
-        ####################### position estimation ############################
+        ####################### id merge with position estimation ############################
         if args.id_merge_with_speed:
 
             # estimate position based on speed and previous position
             new_estimated_position = dict()
-            for i in estimated_position_list.keys():
-                if new_speed_list.get(i) is not None:
-                    new_estimated_position[i] = estimated_position_list[i] + speed_list[i]
+            for i in speed_list.keys():
+                new_estimated_position[i] = estimated_position_list[i] + speed_list[i]
             estimated_position_list = new_estimated_position
 
             new_previous_position = dict()
@@ -88,6 +94,7 @@ def main(args):
                 # if any estimated position is close enough to the current position, merge the id
                 if appeared_id.count(instance_id) == 0:
                     for j in estimated_position_list.keys():
+                        print(f"distance between {instance_id} and {j} is {np.linalg.norm(position - estimated_position_list[j])}")
                         if not j in pcd_id and np.linalg.norm(position - estimated_position_list[j]) < args.position_diff_threshold:
                             same_id_dict[instance_id] = j
                             pcd_id[mask] = j
@@ -95,11 +102,12 @@ def main(args):
                             break
                 # update lists
                 if previous_position.get(instance_id) is not None:
+                    prev_frame, prev_pos = previous_position[instance_id]
                     if speed_list.get(instance_id) is not None:
-                        new_speed_list[instance_id] = (position - previous_position[instance_id]) * args.speed_momentum + (1 - args.speed_momentum) * speed_list[instance_id]
+                        new_speed_list[instance_id] = (position - prev_pos) / (frame_idx - prev_frame) * args.speed_momentum + (1 - args.speed_momentum) * speed_list[instance_id]
                     else:
-                        new_speed_list[instance_id] = position - previous_position[instance_id]
-                new_previous_position[instance_id] = position
+                        new_speed_list[instance_id] = (position - prev_pos) / (frame_idx - prev_frame)
+                new_previous_position[instance_id] = (frame_idx, position)
                 new_estimated_position_list[instance_id] = position
                 if not instance_id in appeared_id:
                     appeared_id.append(instance_id)
@@ -115,13 +123,18 @@ def main(args):
                 if tmp.get(i) is None:
                     tmp[i] = speed_list[i]
             speed_list = tmp
-            previous_position = new_previous_position
+            
+            tmp = new_previous_position
+            for i in previous_position.keys():
+                if tmp.get(i) is None:
+                    tmp[i] = previous_position[i]
+            previous_position = tmp
 
-            for i in range(len(pcd_id)):
-                while pcd_id[i] in same_id_dict.keys():
-                    pcd_id[i] = same_id_dict[pcd_id[i]]
+        for i in range(len(pcd_id)):
+            while pcd_id[i] in same_id_dict.keys():
+                pcd_id[i] = same_id_dict[pcd_id[i]]
 
-        ####################### position estimation ############################
+        ####################### id merge with position estimation ############################
 
         pcd_id_list.append(pcd_id)
         src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
@@ -415,7 +428,7 @@ if __name__ == "__main__":
     parser.add_argument('--dbscan_max_cluster', type=bool, default=False)
     parser.add_argument('--id_merge_with_speed', type=bool, default=False)
     parser.add_argument('--position_diff_threshold', type=float, default=2.0)
-    parser.add_argument('--speed_momentum', type=float, default=0.8)
+    parser.add_argument('--speed_momentum', type=float, default=0.5)
     
 
     args = parser.parse_args()
