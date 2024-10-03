@@ -154,7 +154,7 @@ def main(args):
     aggre_pcd_color_list = list()
 
     ####################### registration with full point cloud ############################
-    if args.registation_with_full_pc:
+    if args.registration_with_full_pc:
         full_pc_list = list()
         for frame_idx in idx_range:
             full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
@@ -453,7 +453,7 @@ if __name__ == "__main__":
     parser.add_argument('--position_diff_threshold', type=float, default=2.0)
     parser.add_argument('--speed_momentum', type=float, default=0.5)
     
-    parser.add_argument('--registation_with_full_pc', type=bool, default=False)
+    parser.add_argument('--registration_with_full_pc', type=bool, default=False)
     parser.add_argument('--z_threshold', type=float, default=1.0)
 
     args = parser.parse_args()
