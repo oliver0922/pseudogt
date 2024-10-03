@@ -152,10 +152,31 @@ def main(args):
     
     aggre_pcd_list = list()
     aggre_pcd_color_list = list()
-    
-    pose_graph = full_registration(src_list,
-                                   max_correspondence_distance_coarse,
-                                   max_correspondence_distance_fine)
+
+    ####################### registration with full point cloud ############################
+    if args.registation_with_full_pc:
+        full_pc_list = list()
+        for frame_idx in idx_range:
+            full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
+            full_pc = full_pc[full_pc[:, 2] > args.z_threshold]
+            
+            color = np.ones_like(full_pc) * [0.5, 0.5, 0.5]
+            src = open3d.geometry.PointCloud()
+            src.points = open3d.utility.Vector3dVector(full_pc)
+            src.colors = open3d.utility.Vector3dVector(color)
+            src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+            full_pc_list.append(src)
+
+        pose_graph = full_registration(full_pc_list,
+                                    max_correspondence_distance_coarse,
+                                    max_correspondence_distance_fine)
+                                    
+    else:
+        pose_graph = full_registration(src_list,
+                                    max_correspondence_distance_coarse,
+                                    max_correspondence_distance_fine)
+    ####################### registration with full point cloud ############################
+                        
     
     print("Optimizing PoseGraph ...")
     
@@ -432,6 +453,8 @@ if __name__ == "__main__":
     parser.add_argument('--position_diff_threshold', type=float, default=2.0)
     parser.add_argument('--speed_momentum', type=float, default=0.5)
     
+    parser.add_argument('--registation_with_full_pc', type=bool, default=False)
+    parser.add_argument('--z_threshold', type=float, default=1.0)
 
     args = parser.parse_args()
     
