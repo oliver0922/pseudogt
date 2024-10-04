@@ -156,8 +156,20 @@ def main(args):
     ####################### registration with full point cloud ############################
     if args.registration_with_full_pc:
         full_pc_list = list()
-        for frame_idx in idx_range:
+        for i, frame_idx in enumerate(idx_range):
+            print(f"frame_idx:{frame_idx}")
             full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
+            if args.registration_remove_instance:
+                dup_full_pc = np.vstack([full_pc, np.array(src_list[i].points)])
+                idx = np.lexsort((dup_full_pc[:, 2], dup_full_pc[:, 1], dup_full_pc[:, 0]))
+                dup_full_pc = dup_full_pc[idx]
+                unique_idx_list = list()
+                for j in range(dup_full_pc.shape[0]):
+                    if (j > 0 and np.linalg.norm(dup_full_pc[j] - dup_full_pc[j-1]) < 0.01) or (j < dup_full_pc.shape[0] - 1 and np.linalg.norm(dup_full_pc[j] - dup_full_pc[j+1]) < 0.01):
+                        continue
+                    unique_idx_list.append(j)
+                full_pc = dup_full_pc[unique_idx_list]
+
             full_pc = full_pc[full_pc[:, 2] > args.z_threshold]
             
             color = np.ones_like(full_pc) * [0.5, 0.5, 0.5]
@@ -455,6 +467,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--registration_with_full_pc', type=bool, default=False)
     parser.add_argument('--z_threshold', type=float, default=1.0)
+    parser.add_argument('--registration_remove_instance', type=bool, default=False)
 
     args = parser.parse_args()
     
