@@ -8,6 +8,7 @@ import os
 from scipy.spatial.transform import Rotation as R
 import hdbscan
 import types
+import math
  
  
  
@@ -310,7 +311,7 @@ def draw_registration_result(source, target, transformation=None, src_bbox=None,
     vis.destroy_window()
  
  
-def translate_boxes_to_open3d_instance(gt_boxes):
+def translate_boxes_to_open3d_instance2(gt_boxes):
     """
              4-------- 6
            /|         /|
@@ -455,7 +456,7 @@ def translate_boxes_to_open3d_instance(gt_boxes):
           |/         |/
           2 -------- 0
     """
-    center = gt_boxes.t
+    center = copy.deepcopy(gt_boxes.t)
     center[1] = center[1]-gt_boxes.h/2
     lwh = [gt_boxes.l, gt_boxes.h, gt_boxes.w]
     axis_angles = np.array([0,  gt_boxes.ry + 1e-10 , 0])
@@ -472,6 +473,33 @@ def translate_boxes_to_open3d_instance(gt_boxes):
  
     return line_set, box3d
  
+
+def translate_boxes_to_lidar_coords(gt_boxes, angle, lidar_to_camera):
+    """
+             4-------- 6
+           /|         /|
+          5 -------- 3 .
+          | |        | |
+          . 7 -------- 1
+          |/         |/
+          2 -------- 0
+    """
+    center = gt_boxes.center
+    center_lidar = lidar_to_camera.T @ center
+    lwh = [gt_boxes.extent[0], gt_boxes.extent[2], gt_boxes.extent[1]]
+    axis_angles = np.array([0, 0, np.pi/2 - angle + 1e-10])
+    rot = open3d.geometry.get_rotation_matrix_from_axis_angle(axis_angles)
+    box3d = open3d.geometry.OrientedBoundingBox(center_lidar, rot, lwh)
+ 
+    line_set = open3d.geometry.LineSet.create_from_oriented_bounding_box(box3d)
+ 
+    # import ipdb; ipdb.set_trace(context=20)
+    lines = np.asarray(line_set.lines)
+    lines = np.concatenate([lines, np.array([[1, 4], [7, 6]])], axis=0)
+ 
+    line_set.lines = open3d.utility.Vector2iVector(lines)
+ 
+    return line_set, box3d
  
  
 def translate_boxes_to_open3d_gtbox(gt_boxes):
@@ -499,9 +527,9 @@ def translate_boxes_to_open3d_gtbox(gt_boxes):
     line_set.lines = open3d.utility.Vector2iVector(lines)
  
     return line_set, box3d
- 
- 
- 
+
+
+
 def draw_point_and_3Dpred_bbox_not_l_shaped(pcd, orient_bbox=None, axis_bbox= None, gt_box=None, vis=False):
     
     axis_pcd = open3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
