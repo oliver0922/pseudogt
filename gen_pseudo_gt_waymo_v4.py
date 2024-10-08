@@ -317,6 +317,8 @@ def main(args):
                 line_set_gt.paint_uniform_color([0, 0, 1])
                 load_list.append(line_set_gt)
             print(f"bounding box for frame :{frame_idx}")
+            if frame_idx == 68:
+                pass
             o3d.visualization.draw_geometries_with_key_callbacks(load_list, {ord("B"): set_black_background, ord("W"): set_white_background })
 
 
@@ -347,7 +349,7 @@ if __name__ == "__main__":
     parser.add_argument('--speed_momentum', type=float, default=0.5)
     
     parser.add_argument('--registration_with_full_pc', type=bool, default=True)
-    parser.add_argument('--z_threshold', type=float, default=1.0)
+    parser.add_argument('--z_threshold', type=float, default=0.3)
     parser.add_argument('--registration_remove_instance', type=bool, default=True)
 
     args = parser.parse_args()
