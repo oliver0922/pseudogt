@@ -133,6 +133,8 @@ def dbscan_max_cluster(pcd, instance_id, eps=0.2, min_points=10, print_progress=
     print(f"point cloud has {max_label + 1} clusters")
 
     labels_new = labels[np.where(labels != -1)]
+    if len(labels_new) == 0:
+        return np.array([])
     max_cluster_idx = np.argmax(np.bincount(labels_new))
     un_noise_idx = np.where(labels == max_cluster_idx)[0]
 
@@ -418,6 +420,48 @@ def get_lowest_point_rect(ptc, xz_center, l, w, ry):
         (ptc_xz[:, 1] < w/2)
     ys = ptc[mask, 1]
     return ys.max()
+
+def point_normal_rectangle(src):
+    normals = np.array(src.normals)
+    # remove normals with strong y
+    new_src = o3d.geometry.PointCloud()
+    new_src.points = o3d.utility.Vector3dVector(np.array(src.points)[np.where(np.abs(normals[:, 1]) < 0.5)])
+    new_src.normals = o3d.utility.Vector3dVector(normals[np.where(np.abs(normals[:, 1]) < 0.5)])
+    #o3d.visualization.draw_geometries([new_src], point_show_normal=True)
+    normals = normals[np.abs(normals[:, 1]) < 0.5]
+    # only 0, 2 axis
+    normals = normals[:, [0, 2]]
+    angles = np.arctan2(normals[:, 1], normals[:, 0])
+    # find the most frequent angle
+    bins = np.arange(-np.pi, np.pi, np.pi/72)
+    hist, _ = np.histogram(angles, bins=bins)
+    angle = bins[np.argmax(hist)]
+    components = np.array([
+        [np.cos(angle), np.sin(angle)],
+        [-np.sin(angle), np.cos(angle)]
+    ])
+    projection = np.array(src.points)[:, [0, 2]] @ components.T
+    min_x, max_x = projection[:, 0].min(), projection[:, 0].max()
+    min_y, max_y = projection[:, 1].min(), projection[:, 1].max()
+    if (max_x - min_x) < (max_y - min_y):
+        angle += np.pi / 2
+        components = np.array([
+            [np.cos(angle), np.sin(angle)],
+            [-np.sin(angle), np.cos(angle)]
+        ])
+        projection = np.array(src.points)[:, [0, 2]] @ components.T
+        min_x, max_x = projection[:, 0].min(), projection[:, 0].max()
+        min_y, max_y = projection[:, 1].min(), projection[:, 1].max()
+    area = (max_x - min_x) * (max_y - min_y)
+    rval = np.array([
+        [max_x, min_y],
+        [min_x, min_y],
+        [min_x, max_y],
+        [max_x, max_y],
+    ])
+    rval = rval @ components
+    return rval, angle, area
+
  
 def get_obj(ptc, full_ptc, fit_method):
     if fit_method == 'min_zx_area_fit':
@@ -428,6 +472,12 @@ def get_obj(ptc, full_ptc, fit_method):
         corners, ry, area = variance_rectangle(ptc[:, [0, 2]])
     elif fit_method == 'closeness_to_edge':
         corners, ry, area = closeness_rectangle(ptc[:, [0, 2]])
+    elif fit_method == 'point_normal':
+        src = o3d.geometry.PointCloud()
+        src.points = o3d.utility.Vector3dVector(ptc)
+        src.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=50))
+        src.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
+        corners, ry, area = point_normal_rectangle(src)
     else:
         raise NotImplementedError(fit_method)
     ry *= -1

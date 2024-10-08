@@ -15,13 +15,11 @@ CAR_CLASS_SIZE = [4.5, 1.9, 2.0] #l, w, h
 
 
 
-
-
 def main(args):
     
     voxel_size = 0.02
     max_correspondence_distance_coarse = voxel_size * 15.
-    max_correspondence_distance_fine = voxel_size * 1.5
+    max_correspondence_distance_fine = max_correspondence_distance_coarse / 2.
         
     source_full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(args.rgs_start_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
     src_list = list()
@@ -60,7 +58,7 @@ def main(args):
             # o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD],{ord("B"): set_black_background, ord("W"): set_white_background })
         
         if args.perform_db_scan_before_registration:        
-            un_noise_idx = dbscan(src, pcd_id, eps=0.3, min_points= 5)
+            un_noise_idx = dbscan(src, pcd_id, eps=0.5, min_points= 10)
             pcd_id = pcd_id[un_noise_idx]
             masked_pcd_color = pcd_color[un_noise_idx]
             masked_pcd = pcd[un_noise_idx]
@@ -153,18 +151,14 @@ def main(args):
     bounding_boxes = dict()
     
     for idx_instance in instance_idx_list:
-        if idx_instance in [1, 3]:
-            pass
-            #continue
         instance_src_list = list()
         instance_frame_indices = list()
-        center_list = list()
+
         for i, frame_idx in enumerate(idx_range):
             if (pcd_id_list[i] == idx_instance).sum() == 0:
                 continue
             instance_frame_indices.append(frame_idx)
             single_frame_instace_pcd = np.array(src_list[i].points)[pcd_id_list[i] == idx_instance]
-            center_list.append(np.mean(single_frame_instace_pcd, axis=0))
 
             single_frame_instace_pcd_color = np.array(src_list[i].colors)[pcd_id_list[i] == idx_instance]
             single_frame_instance_src = open3d.geometry.PointCloud()
@@ -172,28 +166,19 @@ def main(args):
             single_frame_instance_src.colors = open3d.utility.Vector3dVector(single_frame_instace_pcd_color)
             single_frame_instance_src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
             # make normals to be oriented to the camera
-            single_frame_instance_src.orient_normals_to_align_with_direction()
-            # visualize estimated normals
-            if args.vis:
-                print(f"instance_id:{idx_instance} before registration, frame:{frame_idx}")
-                # o3d.visualization.draw_geometries([single_frame_instance_src], point_show_normal=True)
+            single_frame_instance_src.orient_normals_towards_camera_location(np.array([0, 0, 0]))
             instance_src_list.append(single_frame_instance_src)
 
-        # gen initial pose based on the center of the instance
-        center_list = np.array(center_list)
-        initial_transformation_list = list()
-        initial_transformation_list.append(np.eye(4))
-        for i in range(len(center_list) - 1):
-            translation = center_list[i+1] - center_list[i]
-            initial_transformation = np.eye(4)
-            initial_transformation[:3, 3] = translation
-            initial_transformation_list.append(copy.deepcopy(initial_transformation))
+            if args.vis:
+                print("                                                                            ", end="\r")
+                print(f"instance_id:{idx_instance} frame:{frame_idx}", end="\r")
+                #o3d.visualization.draw_geometries([single_frame_instance_src, AXIS_PCD], point_show_normal=True)
+        print()
 
         transformation_matrix_list = list()
         pose_graph = full_registration(instance_src_list,
                             max_correspondence_distance_coarse,
-                            max_correspondence_distance_fine,
-                            initial_transformation_list)
+                            max_correspondence_distance_fine)
 
         print("Optimizing PoseGraph ...")
         option = o3d.pipelines.registration.GlobalOptimizationOption(
@@ -209,13 +194,15 @@ def main(args):
                 option)
         transformed_src_list = copy.deepcopy(instance_src_list)
         print("Transform points and display")
-        for i in range(len(instance_src_list)):
+        for i in range(0, len(instance_src_list)):
             transformation_matrix_list.append(pose_graph.nodes[i].pose)
-            print(pose_graph.nodes[i].pose)
+            #print(pose_graph.nodes[i].pose)
             transformed_src_list[i].transform(pose_graph.nodes[i].pose)
 
             src1 = copy.deepcopy(instance_src_list[i]).transform(pose_graph.nodes[i].pose)
             src2 = copy.deepcopy(instance_src_list[i-1]).transform(pose_graph.nodes[i-1].pose)
+            src1.paint_uniform_color([1, 0, 0])
+            src2.paint_uniform_color([0, 1, 0])
             #o3d.visualization.draw_geometries_with_key_callbacks([src1, src2], {ord("B"): set_black_background, ord("W"): set_white_background })
 
         global_xyz_transformed_src_list = list()
@@ -233,7 +220,6 @@ def main(args):
         merged_global_xyz_transformed_src.points = open3d.utility.Vector3dVector(np.vstack([np.array(src.points) for src in global_xyz_transformed_src_list]))
         merged_global_xyz_transformed_src.colors = open3d.utility.Vector3dVector(np.vstack([np.array(src.colors) for src in global_xyz_transformed_src_list]))
 
-        ############ noise 제거하기 위해서 instance단위로 dbscan 각각 ##################
         if args.dbscan_each_instance:
             if len(merged_global_xyz_transformed_src.points) < 300:
                 continue
@@ -315,23 +301,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='pseudo bounding generation ')
     parser.add_argument('--dataset_path', type=str, default='../3df_data/waymo_sam2')
     parser.add_argument('--visible_bbox_estimation', type=bool, default=True)
-    parser.add_argument('--perform_db_scan_before_registration', type=bool, default=True)
+    parser.add_argument('--perform_db_scan_before_registration', type=bool, default=False)
     parser.add_argument('--with_gt_box', type=bool, default=False)
     parser.add_argument('--axis_aligned', type=bool, default=True)
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=17)
+    parser.add_argument('--scene_idx', type=int,default=3)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
-    parser.add_argument('--rgs_start_idx',type=int, default=80)
-    parser.add_argument('--rgs_end_idx',type=int, default=180)
+    parser.add_argument('--rgs_start_idx',type=int, default=0)
+    parser.add_argument('--rgs_end_idx',type=int, default=80)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=True)
-    parser.add_argument('--bbox_gen_fit_method', type=str, default='closeness_to_edge')
+    parser.add_argument('--bbox_gen_fit_method', type=str, default='point_normal')
 
-    parser.add_argument('--dbscan_max_cluster', type=bool, default=False)
+    parser.add_argument('--dbscan_max_cluster', type=bool, default=True)
     parser.add_argument('--id_merge_with_speed', type=bool, default=True)
     parser.add_argument('--position_diff_threshold', type=float, default=1.0)
     parser.add_argument('--speed_momentum', type=float, default=0.5)
