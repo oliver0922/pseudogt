@@ -149,6 +149,7 @@ def main(args):
     np_aggre_pcd_id = np.hstack(pcd_id_list).astype(np.int16)
     instance_idx_list = np.unique(np_aggre_pcd_id)
     bounding_boxes = dict()
+    t_bb = dict()
     
     for idx_instance in instance_idx_list:
         instance_src_list = list()
@@ -194,6 +195,8 @@ def main(args):
                 option)
         transformed_src_list = copy.deepcopy(instance_src_list)
         print("Transform points and display")
+        max_ptr_idx = 0
+        max_ptr = 0
         for i in range(0, len(instance_src_list)):
             transformation_matrix_list.append(pose_graph.nodes[i].pose)
             #print(pose_graph.nodes[i].pose)
@@ -203,7 +206,13 @@ def main(args):
             src2 = copy.deepcopy(instance_src_list[i-1]).transform(pose_graph.nodes[i-1].pose)
             src1.paint_uniform_color([1, 0, 0])
             src2.paint_uniform_color([0, 1, 0])
+            if len(src1.points) > max_ptr:
+                max_ptr = len(src1.points)
+                max_ptr_idx = i
             #o3d.visualization.draw_geometries_with_key_callbacks([src1, src2], {ord("B"): set_black_background, ord("W"): set_white_background })
+        center_tr_matrix = copy.deepcopy(pose_graph.nodes[max_ptr_idx].pose)
+        for i in range(len(transformation_matrix_list)):
+            transformation_matrix_list[i] = np.linalg.inv(center_tr_matrix) @ transformation_matrix_list[i]
 
         global_xyz_transformed_src_list = list()
         for point_id in range(len(instance_src_list)):
@@ -259,14 +268,26 @@ def main(args):
             src_lidar = open3d.geometry.PointCloud()
             src_lidar.points = open3d.utility.Vector3dVector(instance_points)
             src_lidar.colors = open3d.utility.Vector3dVector(instance_colors)
-            o3d.visualization.draw_geometries_with_key_callbacks([src_lidar, original_box3d_lidar], {ord("B"): set_black_background, ord("W"): set_white_background })
+            t_obj = get_obj(np.array(src.points),camera_coord_pcd_all, 'closeness_to_edge')
+            t_line_set, t_box3d = translate_boxes_to_open3d_instance(t_obj)
+            t_origin_line_set_lidar, t_original_box3d_lidar = translate_boxes_to_lidar_coords(t_box3d, t_obj.ry, lidar_to_camera)
+            t_origin_line_set_lidar.paint_uniform_color([0, 1, 0])
+            origin_line_set_lidar.paint_uniform_color([1, 0, 0])
+            o3d.visualization.draw_geometries_with_key_callbacks([src_lidar, origin_line_set_lidar, t_origin_line_set_lidar], {ord("B"): set_black_background, ord("W"): set_white_background })
         
         i = 0
         for frame_idx in idx_range:
             if frame_idx in instance_frame_indices:
                 tr_matrix = transformation_matrix_list[i]
-                line_set_lidar = copy.deepcopy(origin_line_set_lidar).transform(np.linalg.inv(tr_matrix))
+                tr_matrix = np.linalg.inv(tr_matrix)
+                new_tr_mat = np.eye(4)
+                rotation = np.arctan2(tr_matrix[1, 0], tr_matrix[0, 0])
+                new_tr_mat[:3, :3] = R.from_euler('z', rotation).as_matrix()
+                new_tr_mat[:3, 3] = copy.deepcopy(origin_line_set_lidar).transform(tr_matrix).get_center() - copy.deepcopy(origin_line_set_lidar).transform(new_tr_mat).get_center()
+                line_set_lidar = copy.deepcopy(origin_line_set_lidar).transform(new_tr_mat)
+                t_line_set_lidar = copy.deepcopy(t_origin_line_set_lidar).transform(new_tr_mat)
                 bounding_boxes[(idx_instance, frame_idx)] = copy.deepcopy(line_set_lidar)
+                t_bb[(idx_instance, frame_idx)] = copy.deepcopy(t_line_set_lidar)
                 i += 1
         ############### bounding box generation ################
 
@@ -277,7 +298,10 @@ def main(args):
                 if (idx_instance, frame_idx) in bounding_boxes.keys():
                     line_set_lidar = bounding_boxes[(idx_instance, frame_idx)]
                     line_set_lidar.paint_uniform_color([1, 0, 0])
+                    t_line_set_lidar = t_bb[(idx_instance, frame_idx)]
+                    t_line_set_lidar.paint_uniform_color([0, 1, 0])
                     load_list.append(line_set_lidar)
+                    load_list.append(t_line_set_lidar)
             full_pc_xyz = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
             full_pc_xyz = full_pc_xyz[full_pc_xyz[:, 2] > args.z_threshold]
             color = np.ones_like(full_pc_xyz) * [0.5, 0.5, 0.5]
@@ -307,11 +331,11 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=3)
+    parser.add_argument('--scene_idx', type=int,default=17)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=80)
+    parser.add_argument('--rgs_end_idx',type=int, default=78)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=True)
@@ -345,4 +369,4 @@ if __name__ == "__main__":
         vis.add_geometry(src)
         vis.run()    
     
-    main(args)        
+    main(args)
