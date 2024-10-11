@@ -462,8 +462,36 @@ def point_normal_rectangle(src):
     rval = rval @ components
     return rval, angle, area
 
+
+def given_angle_bbox_fit(src, angle):
+    components = np.array([
+        [np.cos(angle), np.sin(angle)],
+        [-np.sin(angle), np.cos(angle)]
+    ])
+    projection = np.array(src.points)[:, [0, 2]] @ components.T
+    min_x, max_x = projection[:, 0].min(), projection[:, 0].max()
+    min_y, max_y = projection[:, 1].min(), projection[:, 1].max()
+    if (max_x - min_x) < (max_y - min_y):
+        angle += np.pi / 2
+        components = np.array([
+            [np.cos(angle), np.sin(angle)],
+            [-np.sin(angle), np.cos(angle)]
+        ])
+        projection = np.array(src.points)[:, [0, 2]] @ components.T
+        min_x, max_x = projection[:, 0].min(), projection[:, 0].max()
+        min_y, max_y = projection[:, 1].min(), projection[:, 1].max()
+    area = (max_x - min_x) * (max_y - min_y)
+    rval = np.array([
+        [max_x, min_y],
+        [min_x, min_y],
+        [min_x, max_y],
+        [max_x, max_y],
+    ])
+    rval = rval @ components
+    return rval, angle, area
+
  
-def get_obj(ptc, fit_method):
+def get_obj(ptc, fit_method, angle=None):
     if fit_method == 'min_zx_area_fit':
         corners, ry, area = minimum_bounding_rectangle(ptc[:, [0, 2]])
     elif fit_method == 'PCA':
@@ -478,6 +506,10 @@ def get_obj(ptc, fit_method):
         src.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=50))
         src.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
         corners, ry, area = point_normal_rectangle(src)
+    elif fit_method == 'given_angle':
+        if angle is None:
+            raise ValueError('angle is None')
+        corners, ry, area = given_angle_bbox_fit(ptc, angle)
     else:
         raise NotImplementedError(fit_method)
     ry *= -1
@@ -549,6 +581,24 @@ def translate_boxes_to_lidar_coords(gt_boxes, angle, lidar_to_camera):
  
     line_set.lines = open3d.utility.Vector2iVector(lines)
  
+    return line_set, box3d
+
+
+def translate_obj_to_open3d_instance(obj):
+    center = obj.center
+    center[2] = center[2]+obj.extent[2]/2
+    lwh = obj.extent
+    axis_angles = np.array([0, 0, obj.ry + 1e-10])
+    rot = open3d.geometry.get_rotation_matrix_from_axis_angle(axis_angles)
+    box3d = open3d.geometry.OrientedBoundingBox(center, rot, lwh)
+
+    line_set = open3d.geometry.LineSet.create_from_oriented_bounding_box(box3d)
+
+    lines = np.asarray(line_set.lines)
+    lines = np.concatenate([lines, np.array([[1, 4], [7, 6]])], axis=0)
+
+    line_set.lines = open3d.utility.Vector2iVector(lines)
+
     return line_set, box3d
  
  
