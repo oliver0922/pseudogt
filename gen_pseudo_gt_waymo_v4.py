@@ -140,7 +140,7 @@ def pcd_face_detection(pcd):
 
 
 
-def locate_bbox(pcd, bbox_size, prev_direction):
+def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
     # Given camera location(0, 0, 0), we can find bbox face visible at camera
     # we are going to extend invisible bbox face to fit the bbox size
     # prev_direction is given to find long side of bbox
@@ -149,7 +149,7 @@ def locate_bbox(pcd, bbox_size, prev_direction):
     obj = types.SimpleNamespace()
     obj.center = LIDAR_TO_CAMERA.T @ tmp.t
     obj.extent = np.array([tmp.w, tmp.l, tmp.h])
-    obj.ry = tmp.ry
+    obj.ry = -tmp.ry
     # if diff between prev_direction and bbox direction is near 90 degree or 270 degree, we need to add or sub 90 degree
     # check near 90 degree or 270 degree
     if np.abs(np.abs(obj.ry - prev_direction) - np.pi/2) < np.pi/6 or np.abs(np.abs(obj.ry - prev_direction) - 3*np.pi/2) < np.pi/6:
@@ -214,6 +214,9 @@ def locate_bbox(pcd, bbox_size, prev_direction):
         raise ValueError("bbox face visible at camera is not 1 or 2")
 
     obj.extent = bbox_size
+    if give_initial_box:
+        line_set, _ = gen_bbox(pcd, 'point_normal')
+        return obj, line_set
     return obj
     
 
@@ -374,14 +377,16 @@ def main(args):
             src = open3d.geometry.PointCloud()
             src.points = open3d.utility.Vector3dVector(sparse_instance_pcd_list[instance_id][frame_idx])
             src.paint_uniform_color(instance_pcd_color_list[instance_id])
-            this_bbox = locate_bbox(src, bbox_size, prev_direction)
+            this_bbox, init_line = locate_bbox(src, bbox_size, prev_direction, give_initial_box=True)
             line_set, _ = translate_obj_to_open3d_instance(this_bbox)
             # paint orange
             line_set.paint_uniform_color([1, 0.706, 0])
+
+            init_line.paint_uniform_color([0.706, 0.706, 0])
             sparse_bbox_list[instance_id][frame_idx] = line_set
             gt_lines = find_gtbbox(src, frame_idx)
             print(f"pseudo bbox for instance {instance_id} in frame {frame_idx} is generated, bbox size from {single_instance_pcd_frame_idx_list[nearest_i]}")
-            o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, bbox, gt_lines])
+            o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, bbox, gt_lines, init_line])
         #############################################################################
 
     if args.vis:
