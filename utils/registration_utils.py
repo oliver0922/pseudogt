@@ -85,7 +85,7 @@ def full_registration(pcds):
     odo_list.append(odometry)
     for target_id in range(n_pcds):
         print("                                                                            ", end="\r")
-        print(f"Registration: {target_id}/{n_pcds}", end="\r")
+        print(f"Registration: {target_id + 1}/{n_pcds}", end="\r")
         for source_id in range(target_id - 1, -1, -1):
             if target_id == source_id + 1:
                 initial_transformation = np.identity(4)
