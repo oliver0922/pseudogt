@@ -213,6 +213,7 @@ def locate_bbox(pcd, bbox_size, prev_direction):
         o3d.visualization.draw_geometries([src, line_set])
         raise ValueError("bbox face visible at camera is not 1 or 2")
 
+    obj.extent = bbox_size
     return obj
     
 
@@ -378,6 +379,9 @@ def main(args):
             # paint orange
             line_set.paint_uniform_color([1, 0.706, 0])
             sparse_bbox_list[instance_id][frame_idx] = line_set
+            gt_lines = find_gtbbox(src, frame_idx)
+            print(f"pseudo bbox for instance {instance_id} in frame {frame_idx} is generated, bbox size from {single_instance_pcd_frame_idx_list[nearest_i]}")
+            o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, bbox, gt_lines])
         #############################################################################
 
     if args.vis:
