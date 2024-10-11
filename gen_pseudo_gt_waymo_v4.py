@@ -53,12 +53,14 @@ def dbscan_per_frame_instance(instance_frame_pcd):
 
 
 
-def gen_bbox(pcd, fit_method):
+def gen_bbox(pcd, fit_method, only_angle=False):
     lidar_to_camera = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
     camera_coord_pcd = np.array(pcd.points) @ lidar_to_camera.T
     if len(pcd.points) == 0:
         return None, None
     obj = get_obj(camera_coord_pcd, fit_method)
+    if only_angle:
+        return obj.ry
     _, box3d = translate_boxes_to_open3d_instance(obj)
     return translate_boxes_to_lidar_coords(box3d, obj.ry, lidar_to_camera)
 
@@ -105,20 +107,46 @@ def visualize_whole_frame(frame_idx, bbox_set, z_threshold):
     src.points = open3d.utility.Vector3dVector(full_pc)
     src.paint_uniform_color([0.706, 0.706, 0.706])
     print(f"frame {frame_idx} is visualized")
-    o3d.visualization.draw_geometries_with_key_callbacks([src] + bbox_set + gt_list, {ord("B"): set_black_background, ord("W"): set_white_background })
+    o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD] + bbox_set + gt_list, {ord("B"): set_black_background, ord("W"): set_white_background })
 
 
 
-def pcd_direction(pcd):
+def extend_bbox(pcd, bbox_size):
     pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
     pcd.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
     normals = np.array(pcd.normals)
-    normals = normals[abs(normals[:, 1]) < 0.5]
+    normals = normals[abs(normals[:, 1]) < 0.3]
     normals = normals[:, [0, 2]]
     normal_angles = np.arctan2(normals[:, 1], normals[:, 0])
+
+    box_angle = gen_bbox(pcd, 'point_normal', only_angle=True)
     obj = get_obj(np.array(pcd.points), 'point_normal')
-    box_angle = obj.ry
+    # count angles near box angle, box angle + pi/2, box angle + pi, box angle + 3pi/2
+    angle_list = [box_angle, box_angle + np.pi/2, box_angle + np.pi, box_angle + 3*np.pi/2]
+    angle_list = np.array(angle_list)
+
+    angle_diff = np.abs(angle_list - normal_angles[:, None])
+    threshold = np.pi / 3
+    count = np.sum(angle_diff < threshold, axis=0)
+    face_done = np.logical_or(count > 30, count > max(3, len(normals) * 0.2))
+    done_count = np.sum(face_done)
+    if done_count == 0:
+        pass
+    if done_count == 1:
+        face = np.argmax(face_done)
+        angle = angle_list[face]
+        pass
+    if done_count == 2:
+        if (face_done[0] and face_done[2]) or (face_done[1] and face_done[3]):
+            print("error")
+            pass
+
+    if done_count == 3:
+        face = np.argmin(face_done)
+        angle = angle_list[face]
+        pass
     pass
+
 
 
 
@@ -151,6 +179,7 @@ def main(args):
         for j, frame_idx in enumerate(idx_range):
             instance_frame_pcd = pcd_list[j][pcd_id_list[j] == instance_id]
             instance_frame_pcd_color = pcd_color_list[j][pcd_id_list[j] == instance_id]
+
             if len(instance_frame_pcd) == 0:
                 continue
 
@@ -160,6 +189,12 @@ def main(args):
                 instance_frame_pcd = dbscan_per_frame_instance(instance_frame_pcd)
 
             if len(instance_frame_pcd) <= 70 or np.mean(np.linalg.norm(instance_frame_pcd, axis=1)) > 40.0:
+                if len(instance_frame_pcd) == 0:
+                    continue
+                src = open3d.geometry.PointCloud()
+                src.points = open3d.utility.Vector3dVector(instance_frame_pcd)
+                src.paint_uniform_color(instance_frame_pcd_color[0])
+                direction = extend_bbox(src, [2.0, 3.0, 1.8])
                 continue
 
             instance_pcd_list[instance_id][frame_idx] = instance_frame_pcd
@@ -176,6 +211,8 @@ def main(args):
     instance_bounding_box_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     t_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     for instance_id in unique_instance_id_list:
+        if instance_id != 22:
+            continue
         max_ptr_idx, max_ptr = 0, 0
         ptr_cnt = 0
         single_instance_pcd_list = []
