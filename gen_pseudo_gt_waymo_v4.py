@@ -11,6 +11,7 @@ from utils.utils import dbscan as _dbscan, get_obj,translate_boxes_to_open3d_ins
 from utils.registration_utils import full_registration
 from utils.open3d_utils import set_black_background, set_white_background
 from utils.instance_merge_utils import id_merging, merge_instance_ids
+from utils.visualizer_utils import visualizer
 
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 LIDAR_TO_CAMERA = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
@@ -97,21 +98,6 @@ def get_valid_transformations(transformation_matrix, target_line_set_lidar, get_
     return new_tr_mat
 
 
-
-def visualize_whole_frame(frame_idx, bbox_set, z_threshold):
-    full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
-    full_pc = full_pc[full_pc[:, 2] > z_threshold]
-    gt_bbox = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','annotations',f'{str(frame_idx).zfill(6)}.bin')).reshape(-1, 7)
-    gt_list = []
-    for i in range(len(gt_bbox)):
-        line_gt, _ = translate_boxes_to_open3d_gtbox(gt_bbox[i])
-        line_gt.paint_uniform_color([0, 0, 1])
-        gt_list.append(line_gt)
-    src = open3d.geometry.PointCloud()
-    src.points = open3d.utility.Vector3dVector(full_pc)
-    src.paint_uniform_color([0.706, 0.706, 0.706])
-    print(f"frame {frame_idx} is visualized")
-    o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD] + bbox_set + gt_list, {ord("B"): set_black_background, ord("W"): set_white_background })
 
 
 
@@ -279,6 +265,8 @@ def main(args):
                 print(f"instance {i} is merged with {corr[i]}")
 
     ########################## Registration and generate bbox ########################
+    registration_data_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
+    sparse_bbox_data_list = [[{} for _ in range(np.max(idx_range) + 1)] for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_bounding_box_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     t_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     sparse_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
@@ -322,7 +310,8 @@ def main(args):
         transformation_matrices = []
         for i in range(len(single_instance_src_list)):
             transformation_matrices.append(np.linalg.inv(pose_graph.nodes[max_ptr_idx].pose) @ pose_graph.nodes[i].pose)
-        
+        registration_data_list[instance_id]['transformation_matrix'] = copy.deepcopy(transformation_matrices)
+
         registered_pcd = []
         for i, pcd in enumerate(single_instance_src_list):
             pcd.transform(transformation_matrices[i])
@@ -330,6 +319,7 @@ def main(args):
         registered_src = open3d.geometry.PointCloud()
         registered_src.points = open3d.utility.Vector3dVector(registered_pcd)
         registered_src.paint_uniform_color(instance_pcd_color_list[instance_id])
+        registration_data_list[instance_id]['registered_src'] = registered_src
         if args.vis:
             print(f"instance {instance_id} is registered")
             #o3d.visualization.draw_geometries_with_key_callbacks([registered_src], {ord("B"): set_black_background, ord("W"): set_white_background })
@@ -348,9 +338,12 @@ def main(args):
 
         line_set_lidar.paint_uniform_color([1, 0, 0])
         t_line_set_lidar.paint_uniform_color([0, 1, 0])
+        registration_data_list[instance_id]['line_set_lidar'] = line_set_lidar
+        registration_data_list[instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
         if args.vis:
             gt_lines = find_gtbbox(registered_src, single_instance_pcd_frame_idx_list[max_ptr_idx])
+            registration_data_list[instance_id]['gt_lines'] = gt_lines
             print(f"instance {instance_id} is generated")
             #o3d.visualization.draw_geometries_with_key_callbacks([line_set_lidar, registered_src, gt_lines, t_line_set_lidar], {ord("B"): set_black_background, ord("W"): set_white_background })
         #############################################################################
@@ -385,22 +378,17 @@ def main(args):
             init_line.paint_uniform_color([0.706, 0.706, 0])
             sparse_bbox_list[instance_id][frame_idx] = line_set
             gt_lines = find_gtbbox(src, frame_idx)
-            print(f"pseudo bbox for instance {instance_id} in frame {frame_idx} is generated, bbox size from {single_instance_pcd_frame_idx_list[nearest_i]}")
-            o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, bbox, gt_lines, init_line])
+            print(f"pseudo bbox for instance {instance_id} in frame {frame_idx} is generated, bbox angle from {single_instance_pcd_frame_idx_list[nearest_i]}")
+            sparse_bbox_data_list[instance_id][frame_idx]['src'] = src
+            sparse_bbox_data_list[instance_id][frame_idx]['line_set'] = line_set
+            sparse_bbox_data_list[instance_id][frame_idx]['init_line'] = init_line
+            sparse_bbox_data_list[instance_id][frame_idx]['gt_lines'] = gt_lines
+            sparse_bbox_data_list[instance_id][frame_idx]['nearest_bbox'] = instance_bounding_box_list[instance_id][single_instance_pcd_frame_idx_list[nearest_i]]
+            #o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, instance_bounding_box_list[instance_id][single_instance_pcd_frame_idx_list[nearest_i]], gt_lines, init_line])
         #############################################################################
 
     if args.vis:
-        for frame_idx in idx_range:
-            line_list = []
-            for instance_id in unique_instance_id_list:
-                if frame_idx in instance_bounding_box_list[instance_id].keys():
-                    line_list.append(instance_bounding_box_list[instance_id][frame_idx])
-                if frame_idx in t_bbox_list[instance_id].keys():
-                    line_list.append(t_bbox_list[instance_id][frame_idx])
-                if frame_idx in sparse_bbox_list[instance_id].keys():
-                    line_list.append(sparse_bbox_list[instance_id][frame_idx])
-            visualize_whole_frame(frame_idx, line_list, args.z_threshold)
-
+        visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, idx_range, args)
 
 
 if __name__ == "__main__":
@@ -413,11 +401,11 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=1414)
+    parser.add_argument('--scene_idx', type=int,default=1717)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=80)
+    parser.add_argument('--rgs_end_idx',type=int, default=30)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)
