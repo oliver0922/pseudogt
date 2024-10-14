@@ -627,29 +627,3 @@ def translate_boxes_to_open3d_gtbox(gt_boxes):
     line_set.lines = open3d.utility.Vector2iVector(lines)
  
     return line_set, box3d
-
-
-
-def draw_point_and_3Dpred_bbox_not_l_shaped(pcd, orient_bbox=None, axis_bbox= None, gt_box=None, vis=False):
-    
-    axis_pcd = open3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
-    pcd_with_box = [pcd]
-    
-    if orient_bbox is not None:
-        pcd_with_box.extend(orient_bbox)
-        
-    if axis_bbox is not None:
-        pcd_with_box.extend(axis_bbox)
-    
-    if gt_box is not None:
-        gt_box_line_set = list()
-        for i in range(gt_box.shape[0]):
-            line_set, box3d = translate_boxes_to_open3d_instance_not_lshaped(gt_box[i])
-            line_set.paint_uniform_color((0, 0, 1))
-            gt_box_line_set.append(line_set)
-        pcd_with_box.extend(gt_box_line_set)
-       
-    pcd_with_box.append(axis_pcd)
-    
-    # if vis:
-    o3d.visualization.draw_geometries(pcd_with_box)

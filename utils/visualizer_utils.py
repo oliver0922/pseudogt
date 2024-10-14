@@ -36,6 +36,7 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
             line_set_lidar = registration_data_list[instance_id]['line_set_lidar']
             t_line_set_lidar = registration_data_list[instance_id]['t_line_set_lidar']
             gt_lines = registration_data_list[instance_id]['gt_lines']
+            print(f"Visualizing instance {instance_id}")
             o3d.visualization.draw_geometries_with_key_callbacks([src, line_set_lidar, t_line_set_lidar, gt_lines], {ord("B"): set_black_background, ord("W"): set_white_background })
 
         elif menu_option == "3":
@@ -43,7 +44,7 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
             if not instance_id in unique_instance_id_list:
                 print("Invalid instance id")
                 continue
-            
+
             valid_frame_idx = []
             for frame_idx in idx_range:
                 if 'src' in sparse_bbox_data_list[instance_id][frame_idx].keys():
@@ -63,7 +64,9 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
             init_line = sparse_bbox_data_list[instance_id][frame_idx]['init_line']
             gt_lines = sparse_bbox_data_list[instance_id][frame_idx]['gt_lines']
             nearest_bbox = sparse_bbox_data_list[instance_id][frame_idx]['nearest_bbox']
-            o3d.visualization.draw_geometries_with_key_callbacks([src, line_set, init_line, gt_lines, nearest_bbox], {ord("B"): set_black_background, ord("W"): set_white_background })
+            nearest_registered_idx = sparse_bbox_data_list[instance_id][frame_idx]['nearest_registered_idx']
+            print(f"Visualizing instance {instance_id} at frame {frame_idx}, with nearest registered bbox index {nearest_registered_idx}")
+            o3d.visualization.draw_geometries_with_key_callbacks([src, line_set, init_line, gt_lines, nearest_bbox, AXIS_PCD], {ord("B"): set_black_background, ord("W"): set_white_background })
 
         elif menu_option == "4":
             break
