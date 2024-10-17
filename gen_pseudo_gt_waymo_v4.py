@@ -13,6 +13,10 @@ from utils.open3d_utils import set_black_background, set_white_background
 from utils.instance_merge_utils import id_merging, merge_instance_ids
 from utils.visualizer_utils import visualizer
 
+CAM_LOCS = {1:'FRONT', 2:'FRONT_LEFT', 3:'FRONT_RIGHT', 4:'SIDE_LEFT', 5:'SIDE_RIGHT'}
+CAM_NAMES = ['FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'SIDE_LEFT', 'SIDE_RIGHT']
+CAM_NAMES = ['FRONT']
+
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 LIDAR_TO_CAMERA = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
 
@@ -51,6 +55,7 @@ def dbscan_per_frame_instance(instance_frame_pcd):
     unnoise_idx = _dbscan_max_cluster(src, eps=dis, min_points=5)
     if len(unnoise_idx) == 0:
         return np.array([])
+
     return np.array(src.points)[unnoise_idx]
 
 
@@ -213,8 +218,29 @@ def main(args):
 
     unique_instance_id_list = []
     for frame_idx in idx_range:
-        pcd_with_instance_id = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4)
-        pcd_color = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3]
+        pcd_with_instance_id = []
+        pcd_color = []
+        for cam_name in CAM_NAMES:
+            try:
+                pcd_with_instance_id.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}',  'visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4))
+            except:
+                print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
+                continue
+            try:
+                pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}',  'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
+            except:
+                print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
+                continue
+
+        pcd_with_instance_id = np.array(pcd_with_instance_id)
+        pcd_color = np.array(pcd_color)
+
+        if len(pcd_with_instance_id) == 0:
+            pcd_list.append(np.array([]))
+            pcd_color_list.append(np.array([]))
+            pcd_id_list.append(np.array([]))
+            continue
+
         pcd = pcd_with_instance_id[:, :3]
         pcd_id = pcd_with_instance_id[:, 3]
 
@@ -229,6 +255,7 @@ def main(args):
     ########################## Load instance, frame pcds ########################
     sparse_instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
+    instance_frame_pcd_list = [[{} for _ in range(np.max(idx_range) + 1)] for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_pcd_color_list = {}
     for i, instance_id in enumerate(unique_instance_id_list):
         for j, frame_idx in enumerate(idx_range):
@@ -238,10 +265,16 @@ def main(args):
             if len(instance_frame_pcd) == 0:
                 continue
 
+            instance_frame_pcd_list[instance_id][frame_idx]["before_dbscan"] = instance_frame_pcd
+            instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_frame_pcd_color[0]
+
             instance_pcd_color_list[instance_id] = instance_frame_pcd_color[0]
 
             if args.perform_db_scan_before_registration:
                 instance_frame_pcd = dbscan_per_frame_instance(instance_frame_pcd)
+
+            if len(instance_frame_pcd) != 0:
+                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = instance_frame_pcd
 
             if len(instance_frame_pcd) <= 70 or np.mean(np.linalg.norm(instance_frame_pcd, axis=1)) > 40.0:
                 if len(instance_frame_pcd) == 0:
@@ -252,14 +285,16 @@ def main(args):
             instance_pcd_list[instance_id][frame_idx] = instance_frame_pcd
     #############################################################################
 
+    ########################## ID merging ########################
     if args.id_merge_with_speed:
         corr = id_merging(idx_range, instance_pcd_list, args.speed_momentum, args.position_diff_threshold)
         instance_pcd_list, instance_pcd_color_list, unique_instance_id_list = merge_instance_ids(instance_pcd_list, instance_pcd_color_list, unique_instance_id_list, corr)
         if args.vis:
             for i in corr.keys():
                 print(f"instance {i} is merged with {corr[i]}")
+    #############################################################################
 
-    ########################## Registration and generate bbox ########################
+    ########################## Registration ########################
     registration_data_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     sparse_bbox_data_list = [[{} for _ in range(np.max(idx_range) + 1)] for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_bounding_box_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
@@ -289,6 +324,9 @@ def main(args):
             single_instance_src_list.append(src)
 
         pose_graph, mean_dis = full_registration(single_instance_src_list)
+        #############################################################################
+
+        ########################## Optimization ########################
         print("Optimizing PoseGraph ...")
         option = o3d.pipelines.registration.GlobalOptimizationOption(
             max_correspondence_distance=mean_dis,
@@ -301,6 +339,7 @@ def main(args):
                 o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
                 o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
                 option)
+        #############################################################################
         
         transformation_matrices = []
         for i in range(len(single_instance_src_list)):
@@ -385,7 +424,8 @@ def main(args):
         #############################################################################
 
     if args.vis:
-        visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, idx_range, args)
+        
+        visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, idx_range, args)
 
 
 if __name__ == "__main__":
@@ -398,7 +438,7 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=4141)
+    parser.add_argument('--scene_idx', type=int,default=22222)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
