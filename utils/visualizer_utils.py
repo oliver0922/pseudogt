@@ -10,6 +10,13 @@ from utils.open3d_utils import set_black_background, set_white_background
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 
 def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, idx_range, args):
+    # show frame 0 full point cloud as example
+    full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud','000000.bin'), dtype=np.float32).reshape(-1, 3)
+    src = open3d.geometry.PointCloud()
+    src.points = open3d.utility.Vector3dVector(full_pc)
+    src.paint_uniform_color([0.706, 0.706, 0.706])
+    o3d.visualization.draw_geometries([src, AXIS_PCD])
+    
     while True:
         menu_option = input("1. Visualize specific frame\n2. Visualize registered instance\n3. Visualize sparse instance by frame\n4. Visualize instance by frame\n5. Exit\n")
         if menu_option == "1":
@@ -114,12 +121,19 @@ def visualize_whole_frame(instance_frame_pcd_list, unique_instance_id_list, fram
     src.paint_uniform_color([0.706, 0.706, 0.706])
 
     src_list = []
-    for i in range(np.max(unique_instance_id_list)):
+    id_list = []
+    for i in range(np.max(unique_instance_id_list) + 1):
         if "after_dbscan" in instance_frame_pcd_list[i][frame_idx].keys():
             src = open3d.geometry.PointCloud()
             src.points = open3d.utility.Vector3dVector(instance_frame_pcd_list[i][frame_idx]["after_dbscan"])
             src.paint_uniform_color(instance_frame_pcd_list[i][frame_idx]["color"])
             src_list.append(src)
+            id_text : open3d.t.geometry.TriangleMesh = o3d.t.geometry.TriangleMesh.create_text(str(i), depth= 0.1).to_legacy()
+            id_text.paint_uniform_color(instance_frame_pcd_list[i][frame_idx]["color"])
+            location = np.mean(instance_frame_pcd_list[i][frame_idx]["after_dbscan"], axis=0) + np.array([0, 0, 1.0])
+            id_text.transform([[0.1, 0, 0, location[0]], [0, 0.1, 0, location[1]], [0, 0, 0.1, location[2]], [0, 0, 0, 1]])
+            id_list.append(id_text)
+            print(i)
     print(f"frame {frame_idx} is visualized")
-    o3d.visualization.draw_geometries_with_key_callbacks([src, AXIS_PCD] + bbox_set + gt_list + src_list, {ord("B"): set_black_background, ord("W"): set_white_background })
+    o3d.visualization.draw_geometries_with_key_callbacks([AXIS_PCD] + bbox_set + gt_list + src_list + id_list, {ord("B"): set_black_background, ord("W"): set_white_background })
 

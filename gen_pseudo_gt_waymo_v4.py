@@ -15,7 +15,7 @@ from utils.visualizer_utils import visualizer
 
 CAM_LOCS = {1:'FRONT', 2:'FRONT_LEFT', 3:'FRONT_RIGHT', 4:'SIDE_LEFT', 5:'SIDE_RIGHT'}
 CAM_NAMES = ['FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'SIDE_LEFT', 'SIDE_RIGHT']
-CAM_NAMES = ['FRONT']
+#CAM_NAMES = ['FRONT_RIGHT']
 
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 LIDAR_TO_CAMERA = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
@@ -222,12 +222,12 @@ def main(args):
         pcd_color = []
         for cam_name in CAM_NAMES:
             try:
-                pcd_with_instance_id.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}',  'visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4))
+                pcd_with_instance_id.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', cam_name, 'visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4))
             except:
                 print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
                 continue
             try:
-                pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}',  'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
+                pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', cam_name, 'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
             except:
                 print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
                 continue
@@ -424,8 +424,13 @@ def main(args):
         #############################################################################
 
     if args.vis:
-        
         visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, idx_range, args)
+
+# tr_mash : open3d.t.geometry.TriangleMesh = o3d.t.geometry.TriangleMesh.create_text("Hello", depth=0.1).to_legacy()
+# tr_mash.paint_uniform_color([1, 0, 0])
+# location = np.array([2, 1, 5])
+# tr_mash.transform([[0.1, 0, 0, location[0]], [0, 0.1, 0, location[1]], [0, 0, 0.1, location[2]], [0, 0, 0, 1]])
+# o3d.visualization.draw_geometries([tr_mash])
 
 
 if __name__ == "__main__":
@@ -438,11 +443,11 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=22222)
+    parser.add_argument('--scene_idx', type=int,default=3)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=198)
+    parser.add_argument('--rgs_end_idx',type=int, default=5)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)

@@ -432,8 +432,9 @@ def point_normal_rectangle(src):
     # only 0, 2 axis
     normals = normals[:, [0, 2]]
     angles = np.arctan2(normals[:, 1], normals[:, 0])
+    angles = np.where(angles < 0, angles + np.pi / 2, angles)
     # find the most frequent angle
-    bins = np.arange(-np.pi, np.pi, np.pi/72)
+    bins = np.arange(0, np.pi, np.pi/72)
     hist, _ = np.histogram(angles, bins=bins)
     angle = bins[np.argmax(hist)]
     components = np.array([
