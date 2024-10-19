@@ -20,6 +20,7 @@ class Frame_Visualizer:
         self.sparse_bbox_list = sparse_bbox_list
         self.sparse_bbox_data_list = sparse_bbox_data_list
         self.args = args
+        self.toggle_view_merged_id = True
 
     def load_data(self):
         load_list = []
@@ -51,8 +52,19 @@ class Frame_Visualizer:
 
         src_list = []
         id_list = []
+        
         for i in range(np.max(self.unique_instance_id_list) + 1):
-            if "after_dbscan" in self.instance_frame_pcd_list[i][self.frame_idx].keys():
+            if self.toggle_view_merged_id and "after_dbscan_id_merge" in self.instance_frame_pcd_list[i][self.frame_idx].keys():
+                src = open3d.geometry.PointCloud()
+                src.points = open3d.utility.Vector3dVector(self.instance_frame_pcd_list[i][self.frame_idx]["after_dbscan_id_merge"])
+                src.paint_uniform_color(self.instance_frame_pcd_list[i][self.frame_idx]["color"])
+                src_list.append(src)
+                id_text : open3d.t.geometry.TriangleMesh = o3d.t.geometry.TriangleMesh.create_text(str(i), depth=3.0).to_legacy()
+                id_text.paint_uniform_color(self.instance_frame_pcd_list[i][self.frame_idx]["color"])
+                location = np.mean(self.instance_frame_pcd_list[i][self.frame_idx]["after_dbscan_id_merge"], axis=0) + np.array([0, 0, 1.0])
+                id_text.transform([[0.1, 0, 0, location[0]], [0, 0.1, 0, location[1]], [0, 0, 0.1, location[2]], [0, 0, 0, 1]])
+                id_list.append(id_text)
+            elif not self.toggle_view_merged_id and "after_dbscan" in self.instance_frame_pcd_list[i][self.frame_idx].keys():
                 src = open3d.geometry.PointCloud()
                 src.points = open3d.utility.Vector3dVector(self.instance_frame_pcd_list[i][self.frame_idx]["after_dbscan"])
                 src.paint_uniform_color(self.instance_frame_pcd_list[i][self.frame_idx]["color"])
@@ -68,8 +80,8 @@ class Frame_Visualizer:
     def visualize(self):
         print(f"Visualizing frame {self.frame_idx}")
         o3d.visualization.draw_geometries_with_key_callbacks(self.load_data(), {ord("B"): set_black_background, ord("W"): set_white_background,
-            ord("A"): self.vis_prev_frame(),
-            ord("D"): self.vis_next_frame()})
+            ord("A"): self.vis_prev_frame(), ord("D"): self.vis_next_frame(),
+            ord("S"): self.toggle_view_merged_id_func()})
         
     def vis_next_frame(self):
         def vis_next_frame(vis):
@@ -112,6 +124,26 @@ class Frame_Visualizer:
             ctr.convert_from_pinhole_camera_parameters(cam_params, True)
             print(f"frame_idx: {self.frame_idx}")
         return vis_prev_frame
+    
+    def toggle_view_merged_id_func(self):
+        def toggle_view_merged_id_func(vis):
+            ctr = vis.get_view_control()
+            params = ctr.convert_to_pinhole_camera_parameters()
+            camera_position = copy.deepcopy(params.extrinsic)
+
+            self.toggle_view_merged_id = not self.toggle_view_merged_id
+            vis.clear_geometries()
+            loads = self.load_data()
+            for load in loads:
+                vis.add_geometry(load)
+            vis.update_renderer()
+            intrinsics = vis.get_view_control().convert_to_pinhole_camera_parameters().intrinsic
+            cam_params = o3d.camera.PinholeCameraParameters()
+            cam_params.intrinsic = intrinsics
+            cam_params.extrinsic = camera_position
+            ctr.convert_from_pinhole_camera_parameters(cam_params, True)
+            print(f"toggle_view_merged_id: {self.toggle_view_merged_id}")
+        return toggle_view_merged_id_func
     
 class Registered_Instance_Visualizer:
     def __init__(self, instance_id, registration_data_list, unique_instance_id_list):
@@ -317,6 +349,9 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
                 print("Invalid instance id")
                 continue
             instance_id = int(instance_id)
+            if not "line_set_lidar" in registration_data_list[instance_id].keys():
+                print("Instance is not registered")
+                continue
             registered_instance_vis = Registered_Instance_Visualizer(instance_id, registration_data_list, unique_instance_id_list)
             registered_instance_vis.visualize()
 

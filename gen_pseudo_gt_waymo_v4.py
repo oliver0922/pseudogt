@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation as R
 from utils.utils import dbscan as _dbscan, get_obj,translate_boxes_to_open3d_instance, translate_boxes_to_open3d_gtbox, dbscan_max_cluster as _dbscan_max_cluster, translate_boxes_to_lidar_coords, translate_obj_to_open3d_instance
 from utils.registration_utils import full_registration, fragmetized_full_registration
 from utils.open3d_utils import set_black_background, set_white_background
-from utils.instance_merge_utils import id_merging
+from utils.instance_merge_utils import id_merging, merge_instance_ids
 from utils.visualizer_utils import visualizer
 
 CAM_LOCS = {1:'FRONT', 2:'FRONT_LEFT', 3:'FRONT_RIGHT', 4:'SIDE_LEFT', 5:'SIDE_RIGHT'}
@@ -274,18 +274,17 @@ def main(args):
                 continue
 
             instance_frame_pcd_list[instance_id][frame_idx]["before_dbscan"] = instance_frame_pcd
-            instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_frame_pcd_color[0]
 
             instance_pcd_color_list[instance_id] = instance_frame_pcd_color[0]
 
             if args.perform_db_scan_before_registration:
                 instance_frame_pcd = dbscan_per_frame_instance(instance_frame_pcd)
 
-            if len(instance_frame_pcd) != 0:
-                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = instance_frame_pcd
-
             if len(instance_frame_pcd) == 0:
                 continue
+
+            instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = instance_frame_pcd
+            instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_frame_pcd_color[0]
 
             instance_pcd_list[instance_id][frame_idx] = instance_frame_pcd
     #############################################################################
@@ -293,10 +292,12 @@ def main(args):
     ########################## ID merging ########################
     if args.id_merge_with_speed:
         corr, merge_distance_data = id_merging(idx_range, unique_instance_id_list, instance_pcd_list, args.speed_momentum, args.position_diff_threshold)
-        # instance_pcd_list, instance_pcd_color_list, unique_instance_id_list = merge_instance_ids(instance_pcd_list, instance_pcd_color_list, unique_instance_id_list, corr)
+        instance_pcd_list, instance_pcd_color_list, unique_instance_id_list = merge_instance_ids(instance_pcd_list, instance_pcd_color_list, unique_instance_id_list, corr)
         if args.vis:
             for i in corr.keys():
                 print(f"instance {i} is merged with {corr[i]}")
+
+        print(f"Number of instances after id merging: {len(unique_instance_id_list)}")
     #############################################################################
 
     ######################### Sparse Instance ########################
@@ -305,6 +306,8 @@ def main(args):
     for instance_id in unique_instance_id_list:
         for frame_idx in idx_range:
             if frame_idx in instance_pcd_list[instance_id].keys():
+                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan_id_merge"] = instance_pcd_list[instance_id][frame_idx]
+                instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_pcd_color_list[instance_id]
                 pcd = instance_pcd_list[instance_id][frame_idx]
                 if len(pcd) <= 70 or np.mean(np.linalg.norm(pcd, axis=1)) > 40.0:
                     sparse_instance_pcd_list[instance_id][frame_idx] = pcd
@@ -476,7 +479,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--dbscan_max_cluster', type=bool, default=True)
     parser.add_argument('--id_merge_with_speed', type=bool, default=True)
-    parser.add_argument('--position_diff_threshold', type=float, default=1.5)
+    parser.add_argument('--position_diff_threshold', type=float, default=1.0)
     parser.add_argument('--speed_momentum', type=float, default=0.5)
 
     parser.add_argument('--registration_with_full_pc', type=bool, default=False)

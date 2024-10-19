@@ -2,6 +2,7 @@ import copy
 import numpy as np
 
 def id_merging(frame_range, instance_id_list, instance_pcd_list, speed_momentum, position_diff_threshold):
+    instance_pcd_list = copy.deepcopy(instance_pcd_list)
     appearance = []
     corr = dict()
     tried_list = dict()
@@ -62,3 +63,25 @@ def id_merging(frame_range, instance_id_list, instance_pcd_list, speed_momentum,
         for instance_id in position_this_frame:
             recent_position_frame[instance_id] = (frame_idx, position_this_frame[instance_id])
     return corr, tried_list
+
+
+
+def merge_instance_ids(instance_pcd_list, instance_color_list, unique_instance_id_list, corr):
+    new_unique_instance_id_list = []
+    for i in range(len(unique_instance_id_list)):
+        if unique_instance_id_list[i] in corr.keys():
+            continue
+        new_unique_instance_id_list.append(unique_instance_id_list[i])
+    new_instance_pcd_list = [{} for _ in range(np.max(new_unique_instance_id_list) + 1)]
+    new_instance_color_list = {}
+    for instance_id in range(len(instance_pcd_list)):
+        if not instance_id in unique_instance_id_list:
+            continue
+        src_id, target_id = instance_id, instance_id
+        while target_id in corr.keys():
+            target_id = corr[target_id]
+        for frame_idx in instance_pcd_list[src_id].keys():
+            new_instance_pcd_list[target_id][frame_idx] = instance_pcd_list[src_id][frame_idx]
+        if target_id == src_id:
+            new_instance_color_list[target_id] = instance_color_list[src_id]
+    return new_instance_pcd_list, new_instance_color_list, new_unique_instance_id_list
