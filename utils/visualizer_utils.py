@@ -373,6 +373,9 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
                 print(f"distance between {ind1} and {ind2} is {merge_distance_data[(ind1, ind2)]}")
             else:
                 print(f"distance between {ind1} and {ind2} is not found")
+
+        elif menu_option == "7":
+            break
         
         else:
             print("Invalid option")
