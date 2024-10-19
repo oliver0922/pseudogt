@@ -191,13 +191,9 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
         dir2 = dir2 / np.linalg.norm(dir2) * (bbox_size[0] / 2 - obj.extent[0] / 2)
         obj.center[:2] = obj.center[:2] + dir1 + dir2
     else:
-        # visualize
-        src = open3d.geometry.PointCloud()
-        src.points = open3d.utility.Vector3dVector(face_centers_with_z[vis])
-        src.paint_uniform_color([1, 0, 0])
-        line_set, _ = translate_obj_to_open3d_instance(obj_cp)
-        o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, pcd])
-        raise ValueError("bbox face visible at camera is not 1 or 2")
+        if give_initial_box:
+            return None, None
+        return None
 
     obj.extent = bbox_size
     if give_initial_box:
@@ -220,22 +216,28 @@ def main(args):
     for frame_idx in idx_range:
         pcd_with_instance_id = []
         pcd_color = []
-        for cam_name in CAM_NAMES:
-            try:
-                if args.multicam:
+        if args.multicam:
+            for cam_name in CAM_NAMES:
+                try:
                     pcd_with_instance_id.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', cam_name, 'visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4))
-                else:
-                    pcd_with_instance_id.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', 'visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4))
+                except:
+                    print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
+                    continue
+                try:
+                    pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', cam_name, 'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
+                except:
+                    print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
+                    continue
+        else:
+            try:
+                pcd_with_instance_id.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', 'visualization/uppc_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 4))
             except:
-                print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
+                print(f"scene-{args.scene_idx} {frame_idx} is not found")
                 continue
             try:
-                if args.multicam:
-                    pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', cam_name, 'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
-                else:
-                    pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', 'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
+                pcd_color.extend(np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}', 'visualization/uppc_color_continuous_sam',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)[:, :3])
             except:
-                print(f"scene-{args.scene_idx} {cam_name} {frame_idx} is not found")
+                print(f"scene-{args.scene_idx} {frame_idx} is not found")
                 continue
 
         pcd_with_instance_id = np.array(pcd_with_instance_id)
@@ -293,7 +295,7 @@ def main(args):
 
     ########################## ID merging ########################
     if args.id_merge_with_speed:
-        corr = id_merging(idx_range, instance_pcd_list, args.speed_momentum, args.position_diff_threshold)
+        corr, merge_distance_data = id_merging(idx_range, instance_pcd_list, args.speed_momentum, args.position_diff_threshold)
         instance_pcd_list, instance_pcd_color_list, unique_instance_id_list = merge_instance_ids(instance_pcd_list, instance_pcd_color_list, unique_instance_id_list, corr)
         if args.vis:
             for i in corr.keys():
@@ -417,6 +419,8 @@ def main(args):
             src.points = open3d.utility.Vector3dVector(sparse_instance_pcd_list[instance_id][frame_idx])
             src.paint_uniform_color(instance_pcd_color_list[instance_id])
             this_bbox, init_line = locate_bbox(src, bbox_size, prev_direction, give_initial_box=True)
+            if this_bbox is None:
+                continue
             line_set, _ = translate_obj_to_open3d_instance(this_bbox)
             # paint orange
             line_set.paint_uniform_color([1, 0.706, 0])
@@ -436,7 +440,7 @@ def main(args):
         #############################################################################
 
     if args.vis:
-        visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, idx_range, args)
+        visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, idx_range, args)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='pseudo bounding generation ')
@@ -448,11 +452,11 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=14)
+    parser.add_argument('--scene_idx', type=int,default=1717)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=30)
+    parser.add_argument('--rgs_end_idx',type=int, default=197)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)

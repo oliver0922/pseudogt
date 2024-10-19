@@ -11,13 +11,14 @@ from utils.open3d_utils import set_black_background, set_white_background
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 
 class Frame_Visualizer:
-    def __init__(self, frame_idx, instance_frame_pcd_list, unique_instance_id_list, instance_bounding_box_list, t_bbox_list, sparse_bbox_list, args):
+    def __init__(self, frame_idx, instance_frame_pcd_list, unique_instance_id_list, instance_bounding_box_list, t_bbox_list, sparse_bbox_list, sparse_bbox_data_list, args):
         self.frame_idx = frame_idx
         self.instance_frame_pcd_list = instance_frame_pcd_list
         self.unique_instance_id_list = unique_instance_id_list
         self.instance_bounding_box_list = instance_bounding_box_list
         self.t_bbox_list = t_bbox_list
         self.sparse_bbox_list = sparse_bbox_list
+        self.sparse_bbox_data_list = sparse_bbox_data_list
         self.args = args
 
     def load_data(self):
@@ -29,7 +30,14 @@ class Frame_Visualizer:
                 load_list.append(self.t_bbox_list[instance_id][self.frame_idx])
             if self.frame_idx in self.sparse_bbox_list[instance_id].keys():
                 load_list.append(self.sparse_bbox_list[instance_id][self.frame_idx])
-        full_pc = np.fromfile(os.path.join(self.args.dataset_path,f'scene-{self.args.scene_idx}','pointcloud',f'{str(self.frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
+                load_list.append(self.sparse_bbox_data_list[instance_id][self.frame_idx]["init_line"])
+        try:
+            full_pc = np.fromfile(os.path.join(self.args.dataset_path,f'scene-{self.args.scene_idx}','pointcloud',f'{str(self.frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
+        except:
+            self.frame_idx -= 1
+            self.args.rgs_end_idx -= 1
+            return self.load_data()
+
         full_pc = full_pc[full_pc[:, 2] > self.args.z_threshold]
         gt_bbox = np.fromfile(os.path.join(self.args.dataset_path,f'scene-{self.args.scene_idx}','annotations',f'{str(self.frame_idx).zfill(6)}.bin')).reshape(-1, 7)
         gt_list = []
@@ -195,7 +203,7 @@ class Sparse_Instance_Visualizer:
             for load in loads:
                 vis.add_geometry(load)
             vis.update_renderer()
-            print(f"frame_idx: {self.frame_idx}")
+            print(f"frame_idx: {self.frame_idx}, {len(load[1].points)} points")
         return vis_next_frame
     
     def vis_prev_frame(self):
@@ -209,7 +217,7 @@ class Sparse_Instance_Visualizer:
             for load in loads:
                 vis.add_geometry(load)
             vis.update_renderer()
-            print(f"frame_idx: {self.frame_idx}")
+            print(f"frame_idx: {self.frame_idx}, {len(load[1].points)} points")
         return vis_prev_frame
     
 class Instance_Visualizer:
@@ -250,7 +258,7 @@ class Instance_Visualizer:
             for load in loads:
                 vis.add_geometry(load)
             vis.update_renderer()
-            print(f"frame_idx: {self.frame_idx}")
+            print(f"frame_idx: {self.frame_idx}, {len(load[1].points)} points")
         return vis_next_frame
     
     def vis_prev_frame(self):
@@ -264,7 +272,7 @@ class Instance_Visualizer:
             for load in loads:
                 vis.add_geometry(load)
             vis.update_renderer()
-            print(f"frame_idx: {self.frame_idx}")
+            print(f"frame_idx: {self.frame_idx}, {len(load[1].points)} points")
         return vis_prev_frame
     
     def toggle_show_before_dbscan(self):
@@ -288,19 +296,19 @@ class Instance_Visualizer:
             cam_params.extrinsic = camera_position
 
             ctr.convert_from_pinhole_camera_parameters(cam_params, True)
-            print(f"show_before_dbscan: {self.show_before_dbscan}")
+            print(f"show_before_dbscan: {self.show_before_dbscan}, {len(loads[1].points)} points")
         return toggle_show_before_dbscan
 
-def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, idx_range, args):
+def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, idx_range, args):
     while True:
-        menu_option = input("1. Visualize specific frame\n2. Visualize registered instance\n3. Visualize sparse instance by frame\n4. Visualize instance by frame\n5. Show instance ID list\n6. Exit\n")
+        menu_option = input("1. Visualize specific frame\n2. Visualize registered instance\n3. Visualize sparse instance by frame\n4. Visualize instance by frame\n5. Show instance ID list\n6. Print merge distance data\n7. Exit\n")
         if menu_option == "1":
             frame_idx = input("Enter frame index: ")
             if not frame_idx.isdigit() or not int(frame_idx) in idx_range:
                 print("Invalid frame index")
                 continue
             frame_idx = int(frame_idx)
-            frame_vis = Frame_Visualizer(frame_idx, instance_frame_pcd_list, unique_instance_id_list, instance_bounding_box_list, t_bbox_list, sparse_bbox_list, args)
+            frame_vis = Frame_Visualizer(frame_idx, instance_frame_pcd_list, unique_instance_id_list, instance_bounding_box_list, t_bbox_list, sparse_bbox_list, sparse_bbox_data_list, args)
             frame_vis.visualize()
 
         elif menu_option == "2":
@@ -354,7 +362,17 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
             print(unique_instance_id_list)
 
         elif menu_option == "6":
-            break
+            ind1 = input("Enter instance id 1: ")
+            ind2 = input("Enter instance id 2: ")
+            if not ind1.isdigit() or not ind2.isdigit():
+                print("Invalid instance id")
+                continue
+            ind1 = int(ind1)
+            ind2 = int(ind2)
+            if (ind1, ind2) in merge_distance_data.keys():
+                print(f"distance between {ind1} and {ind2} is {merge_distance_data[(ind1, ind2)]}")
+            else:
+                print(f"distance between {ind1} and {ind2} is not found")
         
         else:
             print("Invalid option")

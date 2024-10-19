@@ -1,6 +1,8 @@
 import numpy as np
 
 def id_merging(frame_range, instance_pcd_list, speed_momentum, position_diff_threshold):
+    tried_list = dict()
+
     speed_list = dict()
     estimated_position_list = dict()
     previous_position = dict()
@@ -39,6 +41,7 @@ def id_merging(frame_range, instance_pcd_list, speed_momentum, position_diff_thr
             if appeared_id.count(instance_id) == 0:
                 for j in estimated_position_list.keys():
                     #print(f"distance between {instance_id} and {j} is {np.linalg.norm(position - estimated_position_list[j])}")
+                    tried_list[(instance_id, j)] = (position, estimated_position_list[j])
                     if not j in pcd_id and np.linalg.norm(position - estimated_position_list[j]) < position_diff_threshold:
                         corr[instance_id] = j
                         pcd_id[mask] = j
@@ -77,7 +80,7 @@ def id_merging(frame_range, instance_pcd_list, speed_momentum, position_diff_thr
         for i in range(len(pcd_id)):
             while pcd_id[i] in corr.keys():
                 pcd_id[i] = corr[pcd_id[i]]
-    return corr
+    return corr, tried_list
 
 
 
