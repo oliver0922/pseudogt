@@ -62,7 +62,7 @@ def pairwise_registration(source, target, initial, near):
         src1 = copy.deepcopy(source)
         src1.paint_uniform_color([1, 0, 0])
         src1.transform(init_transformation)
-        #o3d.visualization.draw_geometries([src1, target, line_set1, line_set2, box1, box2])
+        o3d.visualization.draw_geometries([src1, target, line_set1, line_set2, box1, box2])
 
 
     transformation_icp = icp_fine.transformation
@@ -84,8 +84,8 @@ def full_registration(pcds):
     odo_list = []
     odo_list.append(odometry)
     for target_id in range(n_pcds):
-        print("                                                                            ", end="\r")
-        print(f"Registration: {target_id + 1}/{n_pcds}", end="\r")
+        if n_pcds > 2:
+            print(f"Registration: {target_id + 1}/{n_pcds}", end="\r")
         for source_id in range(target_id - 1, -1, -1):
             if target_id == source_id + 1:
                 initial_transformation = np.identity(4)
@@ -118,5 +118,14 @@ def full_registration(pcds):
         mean_dis /= n_pcds * (n_pcds - 1) / 2
     else :
         mean_dis = mean_dis if mean_dis > 0 else 0.1
-    print()
+    if n_pcds > 2:
+        print()
     return pose_graph, mean_dis
+
+def fragmetized_full_registration(pcds, fragment_size, max_ptr_idx=0):
+    transformation_matrices = []
+    transformation_matrices.append(np.eye(4))
+    for i in range(len(pcds) - 1):
+        pose, _ = full_registration(pcds[i:i+2])
+        transformation_matrices.append(transformation_matrices[-1] @ pose.nodes[1].pose)
+    return transformation_matrices
