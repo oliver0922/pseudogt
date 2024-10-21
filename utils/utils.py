@@ -432,9 +432,10 @@ def point_normal_rectangle(src):
     # only 0, 2 axis
     normals = normals[:, [0, 2]]
     angles = np.arctan2(normals[:, 1], normals[:, 0])
-    angles = np.where(angles < 0, angles + np.pi / 2, angles)
+    angles = np.where(angles < 0, angles + np.pi, angles)
+    angles = np.where(angles >= np.pi / 2, angles - np.pi / 2, angles)
     # find the most frequent angle
-    bins = np.arange(0, np.pi, np.pi/72)
+    bins = np.arange(0, np.pi / 2, np.pi/72)
     hist, _ = np.histogram(angles, bins=bins)
     angle = bins[np.argmax(hist)]
     components = np.array([
@@ -628,3 +629,9 @@ def translate_boxes_to_open3d_gtbox(gt_boxes):
     line_set.lines = open3d.utility.Vector2iVector(lines)
  
     return line_set, box3d
+
+def transfrom_np_points(pcd, transformation_matrix):
+    src = open3d.geometry.PointCloud()
+    src.points = open3d.utility.Vector3dVector(copy.deepcopy(pcd))
+    src.transform(transformation_matrix)
+    return np.array(src.points)

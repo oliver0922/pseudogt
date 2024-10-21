@@ -157,11 +157,12 @@ class Registered_Instance_Visualizer:
         load_list.append(self.registration_data_list[self.instance_id]["line_set_lidar"])
         load_list.append(self.registration_data_list[self.instance_id]["t_line_set_lidar"])
         load_list.append(self.registration_data_list[self.instance_id]["gt_lines"])
-        return [AXIS_PCD] + load_list
+        return load_list
     
     def visualize(self):
         print(f"Visualizing registered instance {self.instance_id}")
-        o3d.visualization.draw_geometries_with_key_callbacks(self.load_data(), {ord("B"): set_black_background, ord("W"): set_white_background, ord("A"): self.vis_prev_instance(), ord("D"): self.vis_next_instance()})
+        o3d.visualization.draw_geometries_with_key_callbacks(self.load_data(), 
+            {ord("B"): set_black_background, ord("W"): set_white_background, ord("A"): self.vis_prev_instance(), ord("D"): self.vis_next_instance()})
 
     def vis_next_instance(self):
         def vis_next_instance(vis):

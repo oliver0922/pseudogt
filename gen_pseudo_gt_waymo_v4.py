@@ -7,11 +7,12 @@ import argparse
 import os
 import types
 from scipy.spatial.transform import Rotation as R
-from utils.utils import dbscan as _dbscan, get_obj,translate_boxes_to_open3d_instance, translate_boxes_to_open3d_gtbox, dbscan_max_cluster as _dbscan_max_cluster, translate_boxes_to_lidar_coords, translate_obj_to_open3d_instance
-from utils.registration_utils import full_registration, fragmetized_full_registration
+from utils.utils import dbscan as _dbscan, get_obj,translate_boxes_to_open3d_instance, translate_boxes_to_open3d_gtbox, dbscan_max_cluster as _dbscan_max_cluster, translate_boxes_to_lidar_coords, translate_obj_to_open3d_instance, transfrom_np_points
+from utils.registration_utils import full_registration, fragmentized_full_registration, full_pc_registration
 from utils.open3d_utils import set_black_background, set_white_background
 from utils.instance_merge_utils import id_merging, merge_instance_ids
 from utils.visualizer_utils import visualizer
+from utils.object_movement_utils import find_dynamic_objects, dynamic_object_registration
 
 CAM_LOCS = {1:'FRONT', 2:'FRONT_LEFT', 3:'FRONT_RIGHT', 4:'SIDE_LEFT', 5:'SIDE_RIGHT'}
 CAM_NAMES = ['FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'SIDE_LEFT', 'SIDE_RIGHT']
@@ -144,8 +145,10 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
     if np.abs(np.abs(obj.ry - prev_direction) - np.pi/2) < np.pi/6 or np.abs(np.abs(obj.ry - prev_direction) - 3*np.pi/2) < np.pi/6:
         if np.abs(obj.ry - prev_direction) < np.pi/2:
             obj.ry += np.pi/2
+            obj.extent = np.array([obj.extent[1], obj.extent[0], obj.extent[2]])
         else:
             obj.ry -= np.pi/2
+            obj.extent = np.array([obj.extent[1], obj.extent[0], obj.extent[2]])
 
     obj_cp = copy.deepcopy(obj)
     # degree part is done, now we need to find bbox face visible at camera
@@ -179,12 +182,11 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
             obj.center[:2] += (normalized_direction * l).reshape(-1)
     elif np.sum(invis) == 2:
         cor = np.sum(face_centers[vis], axis=0) - obj.center[:2]
-        # odd index is ind1, even index is ind2 in not invis
         indices = np.where(vis)[0]
         if indices[0] % 2 == 0:
             ind1, ind2 = indices[0], indices[1]
         else:
-            ind2, ind1 = indices[0], indices[1]
+            ind1, ind2 = indices[1], indices[0]
         dir1 = face_centers[ind1] - cor
         dir2 = face_centers[ind2] - cor
         dir1 = dir1 / np.linalg.norm(dir1) * (bbox_size[1] / 2 - obj.extent[1] / 2)
@@ -204,8 +206,6 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
 
 
 def main(args):
-
-
     idx_range = range(args.rgs_start_idx, args.rgs_end_idx+1)
 
     pcd_list = []
@@ -260,8 +260,24 @@ def main(args):
 
     unique_instance_id_list = np.unique(np.concatenate(unique_instance_id_list)).astype(int)
 
+    ########################## Full Registration ########################
+    full_pc_list = []
+    for i, frame_idx in enumerate(idx_range):
+        full_pc = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
+        src = open3d.geometry.PointCloud()
+        src.points = open3d.utility.Vector3dVector(full_pc)
+        full_pc_list.append(src)
+    world_transformation_matrices = full_pc_registration(full_pc_list)
+    inv_world_transformation_matrices = [np.linalg.inv(tr) for tr in world_transformation_matrices]
+
+    for i, frame_idx in enumerate(idx_range):
+        src = o3d.geometry.PointCloud()
+        src.points = open3d.utility.Vector3dVector(pcd_list[i])
+        src = src.transform(world_transformation_matrices[i])
+        pcd_list[i] = np.array(src.points)
+    #############################################################################
+
     ########################## Load instance, frame pcds ########################
-    sparse_instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_frame_pcd_list = [[{} for _ in range(np.max(idx_range) + 1)] for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_pcd_color_list = {}
@@ -273,7 +289,7 @@ def main(args):
             if len(instance_frame_pcd) == 0:
                 continue
 
-            instance_frame_pcd_list[instance_id][frame_idx]["before_dbscan"] = instance_frame_pcd
+            instance_frame_pcd_list[instance_id][frame_idx]["before_dbscan"] = transfrom_np_points(instance_frame_pcd, inv_world_transformation_matrices[j])
 
             instance_pcd_color_list[instance_id] = instance_frame_pcd_color[0]
 
@@ -283,7 +299,7 @@ def main(args):
             if len(instance_frame_pcd) == 0:
                 continue
 
-            instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = instance_frame_pcd
+            instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = transfrom_np_points(instance_frame_pcd, inv_world_transformation_matrices[j])
             instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_frame_pcd_color[0]
 
             instance_pcd_list[instance_id][frame_idx] = instance_frame_pcd
@@ -304,12 +320,12 @@ def main(args):
     sparse_instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     new_instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     for instance_id in unique_instance_id_list:
-        for frame_idx in idx_range:
+        for j, frame_idx in enumerate(idx_range):
             if frame_idx in instance_pcd_list[instance_id].keys():
-                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan_id_merge"] = instance_pcd_list[instance_id][frame_idx]
+                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan_id_merge"] = transfrom_np_points(instance_pcd_list[instance_id][frame_idx], inv_world_transformation_matrices[j])
                 instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_pcd_color_list[instance_id]
                 pcd = instance_pcd_list[instance_id][frame_idx]
-                if len(pcd) <= 70 or np.mean(np.linalg.norm(pcd, axis=1)) > 40.0:
+                if len(pcd) <= 100 or np.mean(np.linalg.norm(pcd, axis=1)) > 50.0:
                     sparse_instance_pcd_list[instance_id][frame_idx] = pcd
                     continue
                 new_instance_pcd_list[instance_id][frame_idx] = pcd
@@ -317,142 +333,161 @@ def main(args):
     instance_pcd_list = new_instance_pcd_list
     #############################################################################
 
-    ########################## Registration ########################
+    ########################## Dynamic Object Recognition ########################
+    dynamic_instance_id_list, static_instance_id_list = find_dynamic_objects(instance_pcd_list, unique_instance_id_list, idx_range, args)
+    ##############################################################################
+
+    ########################## Dynamic Object ########################
     registration_data_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     sparse_bbox_data_list = [[{} for _ in range(np.max(idx_range) + 1)] for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_bounding_box_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     t_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     sparse_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
-    for instance_id in unique_instance_id_list:
-        max_ptr_idx, max_ptr = 0, 0
-        ptr_cnt = 0
-        single_instance_pcd_list = []
-        single_instance_pcd_frame_idx_list = []
+    for dynamic_instance_id in dynamic_instance_id_list:
+        print(f"Dynamic instance id: {dynamic_instance_id}")
+        dynamic_instance_src_dict = {}
         for frame_idx in idx_range:
-            if frame_idx in instance_pcd_list[instance_id].keys():
-                single_instance_pcd_list.append(instance_pcd_list[instance_id][frame_idx])
-                single_instance_pcd_frame_idx_list.append(frame_idx)
-                if len(instance_pcd_list[instance_id][frame_idx]) > max_ptr:
-                    max_ptr = len(instance_pcd_list[instance_id][frame_idx])
-                    max_ptr_idx = ptr_cnt
-                ptr_cnt += 1
+            if frame_idx in instance_pcd_list[dynamic_instance_id].keys():
+                src = open3d.geometry.PointCloud()
+                src.points = open3d.utility.Vector3dVector(instance_pcd_list[dynamic_instance_id][frame_idx])
+                src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
+                dynamic_instance_src_dict[frame_idx] = src
+        dynamic_transformation_list, center_idx = dynamic_object_registration(dynamic_instance_src_dict, dynamic_instance_id, idx_range, args)
+        
+        new_dynamic_transformation_list = []
+        for tr in dynamic_transformation_list:
+            new_dynamic_transformation_list.append(np.linalg.inv(dynamic_transformation_list[center_idx]) @ tr)
+        dynamic_transformation_list = new_dynamic_transformation_list
+        registration_data_list[dynamic_instance_id]['transformation_matrix'] = dynamic_transformation_list
+        
+        dynamic_registered_pcd = []
+        dynamic_instance_src_list = []
+        dynamic_instance_pcd_frame_idx_list = list()
+        ptr = 0
+        for frame_idx in idx_range:
+            if frame_idx in dynamic_instance_src_dict.keys():
+                pcd = dynamic_instance_src_dict[frame_idx]
+                pcd.transform(dynamic_transformation_list[ptr])
+                dynamic_registered_pcd.extend(np.array(pcd.points))
+                dynamic_instance_src_list.append(pcd)
+                dynamic_instance_pcd_frame_idx_list.append(frame_idx)
+                ptr += 1
+        dynamic_registered_pcd = transfrom_np_points(dynamic_registered_pcd, inv_world_transformation_matrices[center_idx])
+        dynamic_registered_src = open3d.geometry.PointCloud()
+        dynamic_registered_src.points = open3d.utility.Vector3dVector(dynamic_registered_pcd)
+        dynamic_registered_src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
+        registration_data_list[dynamic_instance_id]['registered_src'] = dynamic_registered_src
 
-        single_instance_src_list = []
-        for pcd in single_instance_pcd_list:
-            src = open3d.geometry.PointCloud()
-            src.points = open3d.utility.Vector3dVector(pcd)
-            src.paint_uniform_color(instance_pcd_color_list[instance_id])
-            src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
-            src.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
-            single_instance_src_list.append(src)
-
-        #############################################################################
-
-        ########################## Optimization ########################
-        #
-        #############################################################################
-
-        transformation_matrices = []
-        if args.fragmentized_registration:
-            transformation_matrices = fragmetized_full_registration(single_instance_src_list, args.fragment_size, max_ptr_idx)
-            t = transformation_matrices[max_ptr_idx]
-            transformation_matrices = [np.linalg.inv(t) @ tr for tr in transformation_matrices]
-        else:
-            pose_graph, mean_dis = full_registration(single_instance_src_list)
-            print("Optimizing PoseGraph ...")
-            option = o3d.pipelines.registration.GlobalOptimizationOption(
-                max_correspondence_distance=mean_dis,
-                edge_prune_threshold=0.9,
-                reference_node=max_ptr_idx)
-            with o3d.utility.VerbosityContextManager(
-                    o3d.utility.VerbosityLevel.Debug) as cm:
-                o3d.pipelines.registration.global_optimization(
-                    pose_graph,
-                    o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
-                    o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
-                    option)
-            for i in range(len(single_instance_src_list)):
-                transformation_matrices.append(np.linalg.inv(pose_graph.nodes[max_ptr_idx].pose) @ pose_graph.nodes[i].pose)
-        registration_data_list[instance_id]['transformation_matrix'] = copy.deepcopy(transformation_matrices)
-
-        registered_pcd = []
-        for i, pcd in enumerate(single_instance_src_list):
-            pcd.transform(transformation_matrices[i])
-            registered_pcd.extend(np.array(pcd.points))
-        registered_src = open3d.geometry.PointCloud()
-        registered_src.points = open3d.utility.Vector3dVector(registered_pcd)
-        registered_src.paint_uniform_color(instance_pcd_color_list[instance_id])
-        registration_data_list[instance_id]['registered_src'] = registered_src
-        if args.vis:
-            print(f"instance {instance_id} is registered")
-            #o3d.visualization.draw_geometries_with_key_callbacks([registered_src], {ord("B"): set_black_background, ord("W"): set_white_background })
-
-        if args.dbscan_each_instance and len(registered_pcd.points) > 500:
+        if args.dbscan_each_instance and len(dynamic_registered_pcd.points) > 500:
             if args.dbscan_max_cluster:
-                registered_src = dbscan_max_cluster(registered_src)
+                dynamic_registered_src = dbscan_max_cluster(dynamic_registered_src)
             else:
-                registered_src = dbscan(registered_src)
+                dynamic_registered_src = dbscan(dynamic_registered_src)
 
-        line_set_lidar, _ = gen_bbox(registered_src, args.bbox_gen_fit_method)
-        t_line_set_lidar, _ = gen_bbox(registered_src, 'closeness_to_edge')
+        line_set_lidar, _ = gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method)
+        t_line_set_lidar, _ = gen_bbox(dynamic_registered_src, 'closeness_to_edge')
 
         if line_set_lidar is None:
             continue
 
         line_set_lidar.paint_uniform_color([1, 0, 0])
         t_line_set_lidar.paint_uniform_color([0, 1, 0])
-        registration_data_list[instance_id]['line_set_lidar'] = line_set_lidar
-        registration_data_list[instance_id]['t_line_set_lidar'] = t_line_set_lidar
+        registration_data_list[dynamic_instance_id]['line_set_lidar'] = line_set_lidar
+        registration_data_list[dynamic_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
-        if args.vis:
-            gt_lines = find_gtbbox(registered_src, single_instance_pcd_frame_idx_list[max_ptr_idx])
-            registration_data_list[instance_id]['gt_lines'] = gt_lines
-            print(f"instance {instance_id} is generated")
-            #o3d.visualization.draw_geometries_with_key_callbacks([line_set_lidar, registered_src, gt_lines, t_line_set_lidar], {ord("B"): set_black_background, ord("W"): set_white_background })
-        #############################################################################
+        gt_lines = find_gtbbox(dynamic_registered_src, dynamic_instance_pcd_frame_idx_list[center_idx])
+        registration_data_list[dynamic_instance_id]['gt_lines'] = gt_lines
 
-        ########################## Transform bbox to each frame ########################
-        for i, frame_idx in enumerate(single_instance_pcd_frame_idx_list):
+        for i, frame_idx in enumerate(dynamic_instance_pcd_frame_idx_list):
             bbox = copy.deepcopy(line_set_lidar)
             t_bbox = copy.deepcopy(t_line_set_lidar)
-            tr_mat = get_valid_transformations(transformation_matrices[i], line_set_lidar)
-            bbox.transform(tr_mat)
-            t_bbox.transform(tr_mat)
-            instance_bounding_box_list[instance_id][frame_idx] = bbox
-            t_bbox_list[instance_id][frame_idx] = t_bbox
+            tr_matrix = get_valid_transformations(dynamic_transformation_list[i], line_set_lidar)
+            bbox = bbox.transform(tr_matrix)
+            t_bbox = t_bbox.transform(tr_matrix)
+            instance_bounding_box_list[dynamic_instance_id][frame_idx] = bbox
+            t_bbox_list[dynamic_instance_id][frame_idx] = t_bbox
 
-
-        for frame_idx in sparse_instance_pcd_list[instance_id].keys():
-            bbox_size = np.array(gen_bbox(registered_src, args.bbox_gen_fit_method, only_size=True))
-            # Get prev_direction from nearest frame
-            ry = gen_bbox(registered_src, args.bbox_gen_fit_method, only_angle=True)
-            # find nearest frame in single_instance_pcd_frame_idx_list
-            # single_instance_pcd_frame_idx_list is sorted
-            nearest_i = np.argmin(np.abs(np.array(single_instance_pcd_frame_idx_list) - frame_idx))
-            prev_direction = get_valid_transformations(transformation_matrices[nearest_i], line_set_lidar, get_rotation=True) + ry
+        for frame_idx in sparse_instance_pcd_list[dynamic_instance_id].keys():
+            bbox_size = np.array(gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method, only_size=True))
+            ry = gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method, only_angle=True)
+            nearest_i = np.argmin(np.abs(np.array(dynamic_instance_pcd_frame_idx_list) - frame_idx))
+            prev_direction = get_valid_transformations(dynamic_transformation_list[nearest_i], line_set_lidar, get_rotation=True)
             src = open3d.geometry.PointCloud()
-            src.points = open3d.utility.Vector3dVector(sparse_instance_pcd_list[instance_id][frame_idx])
-            src.paint_uniform_color(instance_pcd_color_list[instance_id])
+            src.points = open3d.utility.Vector3dVector(sparse_instance_pcd_list[dynamic_instance_id][frame_idx])
+            src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
             this_bbox, init_line = locate_bbox(src, bbox_size, prev_direction, give_initial_box=True)
             if this_bbox is None:
                 continue
             line_set, _ = translate_obj_to_open3d_instance(this_bbox)
-            # paint orange
-            line_set.paint_uniform_color([1, 0.706, 0])
 
+            line_set.paint_uniform_color([1, 0.706, 0])
             init_line.paint_uniform_color([0.706, 0.706, 0])
-            sparse_bbox_list[instance_id][frame_idx] = line_set
+            sparse_bbox_list[dynamic_instance_id][frame_idx] = line_set
             gt_lines = find_gtbbox(src, frame_idx)
-            #print(f"pseudo bbox for instance {instance_id} in frame {frame_idx} is generated, bbox angle from {single_instance_pcd_frame_idx_list[nearest_i]}")
-            sparse_bbox_data_list[instance_id][frame_idx]['src'] = src
-            sparse_bbox_data_list[instance_id][frame_idx]['line_set'] = line_set
-            sparse_bbox_data_list[instance_id][frame_idx]['init_line'] = init_line
-            sparse_bbox_data_list[instance_id][frame_idx]['gt_lines'] = gt_lines
-            sparse_bbox_data_list[instance_id][frame_idx]['nearest_bbox'] = instance_bounding_box_list[instance_id][single_instance_pcd_frame_idx_list[nearest_i]]
-            sparse_bbox_data_list[instance_id][frame_idx]['nearest_registered_idx'] = single_instance_pcd_frame_idx_list[nearest_i]
-            sparse_bbox_data_list[instance_id][frame_idx]['nearest_i'] = nearest_i
-            #o3d.visualization.draw_geometries([src, line_set, AXIS_PCD, instance_bounding_box_list[instance_id][single_instance_pcd_frame_idx_list[nearest_i]], gt_lines, init_line])
-        #############################################################################
+
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['src'] = src
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['line_set'] = line_set
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['init_line'] = init_line
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['gt_lines'] = gt_lines
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['nearest_bbox'] = instance_bounding_box_list[dynamic_instance_id][dynamic_instance_pcd_frame_idx_list[nearest_i]]
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['nearest_registered_idx'] = dynamic_instance_pcd_frame_idx_list[nearest_i]
+            sparse_bbox_data_list[dynamic_instance_id][frame_idx]['nearest_i'] = nearest_i
+
+        print(f"Dynamic instance {dynamic_instance_id} is done")
+    ##############################################################################
+
+    ############################# Static Object ########################
+    for static_instance_id in static_instance_id_list:
+        print(f"Static instance id: {static_instance_id}")
+        static_registered_pcd = []
+        ptr = 0
+        for frame_idx in idx_range:
+            if frame_idx in instance_pcd_list[static_instance_id].keys():
+                pcd = instance_pcd_list[static_instance_id][frame_idx]
+                static_registered_pcd.extend(pcd)
+                ptr = frame_idx
+
+        if len(static_registered_pcd) == 0:
+            continue
+        
+        static_src = open3d.geometry.PointCloud()
+        static_src.points = open3d.utility.Vector3dVector(static_registered_pcd)
+        static_src.paint_uniform_color(instance_pcd_color_list[static_instance_id])
+        static_src.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
+        static_src.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
+        registration_data_list[static_instance_id]['registered_src'] = static_src
+
+        if args.dbscan_each_instance and len(static_registered_pcd) > 500:
+            if args.dbscan_max_cluster:
+                static_src = dbscan_max_cluster(static_src)
+            else:
+                static_src = dbscan(static_src)
+
+        line_set_lidar, _ = gen_bbox(static_src, args.bbox_gen_fit_method)
+        t_line_set_lidar, _ = gen_bbox(static_src, 'closeness_to_edge')
+
+        if line_set_lidar is None:
+            continue
+
+        line_set_lidar.paint_uniform_color([1, 0, 0.706])
+        t_line_set_lidar.paint_uniform_color([0, 1, 0.706])
+        registration_data_list[static_instance_id]['line_set_lidar'] = line_set_lidar
+        registration_data_list[static_instance_id]['t_line_set_lidar'] = t_line_set_lidar
+
+        gt_lines = find_gtbbox(static_src, ptr)
+        registration_data_list[static_instance_id]['gt_lines'] = gt_lines
+
+        for i, frame_idx in enumerate(idx_range):
+            bbox = copy.deepcopy(line_set_lidar)
+            t_bbox = copy.deepcopy(t_line_set_lidar)
+            tr_matrix = get_valid_transformations(world_transformation_matrices[i], line_set_lidar)
+            bbox = bbox.transform(tr_matrix)
+            t_bbox = t_bbox.transform(tr_matrix)
+            instance_bounding_box_list[static_instance_id][frame_idx] = bbox
+            t_bbox_list[static_instance_id][frame_idx] = t_bbox
+
+        print(f"Static instance {static_instance_id} is done")
+        ##############################################################################
 
     if args.vis:
         visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, idx_range, args)
@@ -470,8 +505,8 @@ if __name__ == "__main__":
     parser.add_argument('--scene_idx', type=int,default=1717)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
-    parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=197)
+    parser.add_argument('--rgs_start_idx',type=int, default=30)
+    parser.add_argument('--rgs_end_idx',type=int, default=100)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)
@@ -485,10 +520,12 @@ if __name__ == "__main__":
     parser.add_argument('--registration_with_full_pc', type=bool, default=False)
     parser.add_argument('--z_threshold', type=float, default=0.3)
 
-    parser.add_argument('--fragmentized_registration', type=bool, default=True)
+    parser.add_argument('--fragmentized_registration', type=bool, default=False)
     parser.add_argument('--fragment_size', type=int, default=15)
 
     parser.add_argument('--multicam', type=bool, default=False)
+    parser.add_argument('--dynamic_threshold', type=float, default=0.2)
+    parser.add_argument('--dynamic_threshold_single', type=float, default=0.5)
 
     args = parser.parse_args()
 

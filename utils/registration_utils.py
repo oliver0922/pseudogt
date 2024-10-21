@@ -122,10 +122,25 @@ def full_registration(pcds):
         print()
     return pose_graph, mean_dis
 
-def fragmetized_full_registration(pcds, fragment_size, max_ptr_idx=0):
+def fragmentized_full_registration(pcds, fragment_size, max_ptr_idx=0):
     transformation_matrices = []
     transformation_matrices.append(np.eye(4))
     for i in range(len(pcds) - 1):
         pose, _ = full_registration(pcds[i:i+2])
         transformation_matrices.append(transformation_matrices[-1] @ pose.nodes[1].pose)
+        print(f"Fragmentized Registration: {i + 1}/{len(pcds) - 1}", end="\r")
+    print()
     return transformation_matrices
+
+
+def full_pc_registration(full_pc_list):
+    voxel_down_sampled_full_pc_list = []
+    for full_pc in full_pc_list:
+        voxel_down_sampled_full_pc = full_pc.voxel_down_sample(voxel_size=0.3)
+        voxel_down_sampled_full_pc.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
+        voxel_down_sampled_full_pc.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
+        voxel_down_sampled_full_pc_list.append(voxel_down_sampled_full_pc)
+        print(f"Downsampled {len(voxel_down_sampled_full_pc.points)} points from {len(full_pc.points)}, frame {len(voxel_down_sampled_full_pc_list)}")
+    pose_graph = fragmentized_full_registration(voxel_down_sampled_full_pc_list, 0)
+    return pose_graph
