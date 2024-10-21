@@ -8,23 +8,34 @@ def find_dynamic_objects(instance_pcd_list, unique_instance_id_list, idx_range, 
     dynamic_instance_id_list = []
     static_instance_id_list = []
     for instance_id in unique_instance_id_list:
-        center_list = []
+        prev_center = None
+        prev_frame_idx = None
+        
+        diff_per_frame_sum = 0
+        max_diff_per_frame = 0
+
+        cnt = 0
         for frame_idx in idx_range:
             if frame_idx in instance_pcd_list[instance_id].keys():
-                center_list.append(np.mean(instance_pcd_list[instance_id][frame_idx], axis=0))
-        if len(center_list) < 2:
+                cnt += 1
+                center = np.mean(instance_pcd_list[instance_id][frame_idx], axis=0)
+                if prev_center is not None:
+                    diff_per_frame_sum += np.linalg.norm(center - prev_center) / (frame_idx - prev_frame_idx)
+                    max_diff_per_frame = max(max_diff_per_frame, np.linalg.norm(center - prev_center) / (frame_idx - prev_frame_idx))
+                prev_center = center
+                prev_frame_idx = frame_idx
+        if cnt <= 1:
             static_instance_id_list.append(instance_id)
+            print(f"Static instance id: {instance_id}")
             continue
-        diff_sum = 0
-        max_diff = 0
-        for i in range(1, len(center_list)):
-            diff_sum += np.linalg.norm(center_list[i] - center_list[i - 1])
-            if np.linalg.norm(center_list[i] - center_list[i - 1]) > max_diff:
-                max_diff = np.linalg.norm(center_list[i] - center_list[i - 1])
-        if diff_sum / len(center_list) > args.dynamic_threshold or max_diff > args.dynamic_threshold_single:
+        average_diff_per_frame = diff_per_frame_sum / cnt
+        if average_diff_per_frame > args.dynamic_threshold or max_diff_per_frame > args.dynamic_threshold_single:
             dynamic_instance_id_list.append(instance_id)
+            print(f"Dynamic instance id: {instance_id}, average_diff_per_frame: {average_diff_per_frame}, max_diff_per_frame: {max_diff_per_frame}")
         else:
             static_instance_id_list.append(instance_id)
+            print(f"Static instance id: {instance_id}, average_diff_per_frame: {average_diff_per_frame}, max_diff_per_frame: {max_diff_per_frame}")
+        
     return dynamic_instance_id_list, static_instance_id_list
 
 def dynamic_object_registration(instance_pcd_list, instance_id, idx_range, args):

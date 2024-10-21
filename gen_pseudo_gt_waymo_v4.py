@@ -316,6 +316,10 @@ def main(args):
         print(f"Number of instances after id merging: {len(unique_instance_id_list)}")
     #############################################################################
 
+    ########################## Dynamic Object Recognition ########################
+    dynamic_instance_id_list, static_instance_id_list = find_dynamic_objects(instance_pcd_list, unique_instance_id_list, idx_range, args)
+    ##############################################################################
+
     ######################### Sparse Instance ########################
     sparse_instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     new_instance_pcd_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
@@ -332,10 +336,6 @@ def main(args):
 
     instance_pcd_list = new_instance_pcd_list
     #############################################################################
-
-    ########################## Dynamic Object Recognition ########################
-    dynamic_instance_id_list, static_instance_id_list = find_dynamic_objects(instance_pcd_list, unique_instance_id_list, idx_range, args)
-    ##############################################################################
 
     ########################## Dynamic Object ########################
     registration_data_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
@@ -375,7 +375,7 @@ def main(args):
         dynamic_registered_src = open3d.geometry.PointCloud()
         dynamic_registered_src.points = open3d.utility.Vector3dVector(dynamic_registered_pcd)
         dynamic_registered_src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
-        registration_data_list[dynamic_instance_id]['registered_src'] = dynamic_registered_src
+        registration_data_list[dynamic_instance_id]['registered_src'] = copy.deep_copy(dynamic_registered_src).transform(inv_world_transformation_matrices[center_idx - args.rgs_start_idx])
 
         if args.dbscan_each_instance and len(dynamic_registered_pcd.points) > 500:
             if args.dbscan_max_cluster:
@@ -400,7 +400,7 @@ def main(args):
         for i, frame_idx in enumerate(dynamic_instance_pcd_frame_idx_list):
             bbox = copy.deepcopy(line_set_lidar)
             t_bbox = copy.deepcopy(t_line_set_lidar)
-            tr_matrix = get_valid_transformations(world_transformation_matrices[frame_idx] @ dynamic_transformation_list[i], line_set_lidar)
+            tr_matrix = get_valid_transformations(world_transformation_matrices[frame_idx - args.rgs_start_idx] @ dynamic_transformation_list[i], line_set_lidar)
             bbox = bbox.transform(tr_matrix)
             t_bbox = t_bbox.transform(tr_matrix)
             instance_bounding_box_list[dynamic_instance_id][frame_idx] = bbox
@@ -410,7 +410,7 @@ def main(args):
             bbox_size = np.array(gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method, only_size=True))
             ry = gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method, only_angle=True)
             nearest_i = np.argmin(np.abs(np.array(dynamic_instance_pcd_frame_idx_list) - frame_idx))
-            prev_direction = get_valid_transformations(world_transformation_matrices[frame_idx] @ dynamic_transformation_list[nearest_i], line_set_lidar, get_rotation=True)
+            prev_direction = get_valid_transformations(world_transformation_matrices[frame_idx - args.rgs_start_idx] @ dynamic_transformation_list[nearest_i], line_set_lidar, get_rotation=True)
             src = open3d.geometry.PointCloud()
             src.points = open3d.utility.Vector3dVector(sparse_instance_pcd_list[dynamic_instance_id][frame_idx])
             src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
@@ -504,8 +504,8 @@ if __name__ == "__main__":
     parser.add_argument('--scene_idx', type=int,default=1717)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
-    parser.add_argument('--rgs_start_idx',type=int, default=50)
-    parser.add_argument('--rgs_end_idx',type=int, default=90)
+    parser.add_argument('--rgs_start_idx',type=int, default=0)
+    parser.add_argument('--rgs_end_idx',type=int, default=197)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)
