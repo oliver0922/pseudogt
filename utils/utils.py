@@ -630,7 +630,7 @@ def translate_boxes_to_open3d_gtbox(gt_boxes):
  
     return line_set, box3d
 
-def transfrom_np_points(pcd, transformation_matrix):
+def transform_np_points(pcd, transformation_matrix):
     src = open3d.geometry.PointCloud()
     src.points = open3d.utility.Vector3dVector(copy.deepcopy(pcd))
     src.transform(transformation_matrix)

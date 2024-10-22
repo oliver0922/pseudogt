@@ -25,8 +25,8 @@ def find_dynamic_objects(instance_pcd_list, unique_instance_id_list, idx_range, 
                 prev_center = center
                 prev_frame_idx = frame_idx
         if cnt <= 1:
-            static_instance_id_list.append(instance_id)
-            print(f"Static instance id: {instance_id}")
+            dynamic_instance_id_list.append(instance_id)
+            print(f"Dynamic instance id: {instance_id}")
             continue
         average_diff_per_frame = diff_per_frame_sum / cnt
         if average_diff_per_frame > args.dynamic_threshold or max_diff_per_frame > args.dynamic_threshold_single:
