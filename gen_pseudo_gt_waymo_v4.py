@@ -20,6 +20,7 @@ CAM_NAMES = ['FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'SIDE_LEFT', 'SIDE_RIGHT']
 
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 LIDAR_TO_CAMERA = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
+o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
 def dbscan(pcd):
     dis = np.mean(np.linalg.norm(np.array(pcd.points), axis=1))
@@ -396,7 +397,7 @@ def main(args):
         registration_data_list[dynamic_instance_id]['line_set_lidar'] = line_set_lidar
         registration_data_list[dynamic_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
-        gt_lines = find_gtbbox(dynamic_registered_src, dynamic_instance_pcd_frame_idx_list[center_idx])
+        gt_lines = find_gtbbox(dynamic_registered_src, dynamic_instance_pcd_frame_idx_list[dynamic_instance_pcd_frame_idx_list[center_idx]])
         registration_data_list[dynamic_instance_id]['gt_lines'] = gt_lines
 
         for i, frame_idx in enumerate(dynamic_instance_pcd_frame_idx_list):
@@ -480,7 +481,7 @@ def main(args):
         registration_data_list[static_instance_id]['line_set_lidar'] = line_set_lidar
         registration_data_list[static_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
-        gt_lines = find_gtbbox(static_src, ptr)
+        gt_lines = find_gtbbox(copy.deep_copy(static_src).transform(inv_world_transformation_matrices[ptr - args.rgs_start_idx]), ptr)
         registration_data_list[static_instance_id]['gt_lines'] = gt_lines
 
         for i, frame_idx in enumerate(idx_range):
@@ -535,7 +536,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
     if args.origin:
         source = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(args.src_frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
 
