@@ -376,7 +376,7 @@ def main(args):
         dynamic_registered_src = open3d.geometry.PointCloud()
         dynamic_registered_src.points = open3d.utility.Vector3dVector(dynamic_registered_pcd)
         dynamic_registered_src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
-        registration_data_list[dynamic_instance_id]['registered_src'] = copy.deepcopy(dynamic_registered_src).transform(inv_world_transformation_matrices[center_idx])
+        registration_data_list[dynamic_instance_id]['registered_src'] = dynamic_registered_src
 
         if args.dbscan_each_instance and len(dynamic_registered_src.points) > 500:
             if args.dbscan_max_cluster:
@@ -392,12 +392,10 @@ def main(args):
 
         line_set_lidar.paint_uniform_color([1, 0, 0])
         t_line_set_lidar.paint_uniform_color([0, 1, 0])
-        line_set_lidar = line_set_lidar.transform(inv_world_transformation_matrices[center_idx])
-        t_line_set_lidar = t_line_set_lidar.transform(inv_world_transformation_matrices[center_idx])
         registration_data_list[dynamic_instance_id]['line_set_lidar'] = line_set_lidar
         registration_data_list[dynamic_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
-        gt_lines = find_gtbbox(dynamic_registered_src, dynamic_instance_pcd_frame_idx_list[dynamic_instance_pcd_frame_idx_list[center_idx]])
+        gt_lines = find_gtbbox(dynamic_registered_src, dynamic_instance_pcd_frame_idx_list[center_idx])
         registration_data_list[dynamic_instance_id]['gt_lines'] = gt_lines
 
         for i, frame_idx in enumerate(dynamic_instance_pcd_frame_idx_list):
@@ -481,8 +479,8 @@ def main(args):
         registration_data_list[static_instance_id]['line_set_lidar'] = line_set_lidar
         registration_data_list[static_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
-        gt_lines = find_gtbbox(copy.deep_copy(static_src).transform(inv_world_transformation_matrices[ptr - args.rgs_start_idx]), ptr)
-        registration_data_list[static_instance_id]['gt_lines'] = gt_lines
+        gt_lines = find_gtbbox(copy.deepcopy(static_src).transform(world_transformation_matrices[ptr - args.rgs_start_idx]), ptr)
+        registration_data_list[static_instance_id]['gt_lines'] = copy.deepcopy(gt_lines).transform(inv_world_transformation_matrices[ptr - args.rgs_start_idx])
 
         for i, frame_idx in enumerate(idx_range):
             bbox = copy.deepcopy(line_set_lidar)
@@ -509,7 +507,7 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=1717)
+    parser.add_argument('--scene_idx', type=int,default=32222)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
@@ -531,8 +529,8 @@ if __name__ == "__main__":
     parser.add_argument('--fragment_size', type=int, default=15)
 
     parser.add_argument('--multicam', type=bool, default=False)
-    parser.add_argument('--dynamic_threshold', type=float, default=0.2)
-    parser.add_argument('--dynamic_threshold_single', type=float, default=0.5)
+    parser.add_argument('--dynamic_threshold', type=float, default=0.3)
+    parser.add_argument('--dynamic_threshold_single', type=float, default=1.0)
 
     args = parser.parse_args()
 
