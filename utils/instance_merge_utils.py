@@ -2,11 +2,11 @@ import copy
 import numpy as np
 
 def id_merging(frame_range, instance_id_list, instance_pcd_list, speed_momentum, position_diff_threshold):
-    # last_frame_per_instance = dict()
-    # for instance_id in instance_id_list:
-    #     if len(instance_pcd_list[instance_id]) == 0:
-    #         continue
-    #     last_frame_per_instance[instance_id] = max(instance_pcd_list[instance_id].keys())
+    last_frame_per_instance = dict()
+    for instance_id in instance_id_list:
+        if len(instance_pcd_list[instance_id]) == 0:
+            continue
+        last_frame_per_instance[instance_id] = max(instance_pcd_list[instance_id].keys())
 
     instance_pcd_list = copy.deepcopy(instance_pcd_list)
     appearance = []
@@ -35,8 +35,8 @@ def id_merging(frame_range, instance_id_list, instance_pcd_list, speed_momentum,
             if instance_id not in appearance:
                 appearance.append(instance_id)
                 for prev_instance_id in estimated_position.keys():
-                    # if last_frame_per_instance[prev_instance_id] >= frame_idx:
-                    #     continue
+                    if last_frame_per_instance[prev_instance_id] >= frame_idx:
+                        continue
                     
                     tried_list[(instance_id, prev_instance_id)] = np.linalg.norm(position_this_frame[instance_id] - estimated_position[prev_instance_id])
                     if np.linalg.norm(position_this_frame[instance_id] - estimated_position[prev_instance_id]) < position_diff_threshold:

@@ -133,6 +133,23 @@ def fragmentized_full_registration(pcds, fragment_size, max_ptr_idx=0):
     return transformation_matrices
 
 
+
+def frame_pairwise_registration(source, target):
+    dis = np.mean(np.linalg.norm(np.array(source.points), axis=1)) + np.mean(np.linalg.norm(np.array(target.points), axis=1))
+    dis *= 2
+    trans = np.mean(np.array(target.points), axis=0) - np.mean(np.array(source.points), axis=0)
+    init_transformation = np.eye(4)
+    init_transformation[:3, 3] = trans
+    icp_coarse = o3d.pipelines.registration.registration_icp(
+        source, target, dis, init_transformation,
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    icp_fine = o3d.pipelines.registration.registration_icp(
+        source, target, dis / 4, icp_coarse.transformation,
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    return icp_fine.transformation
+
+
+
 def full_pc_registration(full_pc_list):
     voxel_down_sampled_full_pc_list = []
     for full_pc in full_pc_list:
@@ -142,5 +159,74 @@ def full_pc_registration(full_pc_list):
         voxel_down_sampled_full_pc.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
         voxel_down_sampled_full_pc_list.append(voxel_down_sampled_full_pc)
         print(f"Downsampled {len(voxel_down_sampled_full_pc.points)} points from {len(full_pc.points)}, frame {len(voxel_down_sampled_full_pc_list)}")
-    pose_graph = fragmentized_full_registration(voxel_down_sampled_full_pc_list, 0)
-    return pose_graph
+    tr_matrices = fragmentized_full_registration(voxel_down_sampled_full_pc_list, 1)
+    # pose_graph = o3d.pipelines.registration.PoseGraph()
+    # for i in range(len(tr_matrices)):
+    #     pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(tr_matrices[i]))
+
+    # prefix_matmul = []
+    # prefix_matmul.append(tr_matrices[0])
+    # for i in range(1, len(tr_matrices)):
+    #     prefix_matmul.append(prefix_matmul[-1] @ tr_matrices[i])
+
+    # for i in range(len(tr_matrices) - 1):
+    #     print("                                                                        ", end="\r")
+    #     for j in range(i + 1, len(tr_matrices)):
+    #         print(f"Pairwise Registration: {i + 1}/{len(tr_matrices) - 1}, {j + 1}/{len(tr_matrices)}", end="\r")
+    #         current_tr = np.dot(np.linalg.inv(prefix_matmul[i]), prefix_matmul[j])
+    #         dis = np.mean(np.linalg.norm(np.array(voxel_down_sampled_full_pc_list[i].points), axis=1)) + np.mean(np.linalg.norm(np.array(voxel_down_sampled_full_pc_list[j].points), axis=1))
+    #         dis /= 2
+    #         dis = dis * (0.2 * np.pi / 180) * 6
+    #         information_icp = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
+    #             voxel_down_sampled_full_pc_list[i], voxel_down_sampled_full_pc_list[j], dis,
+    #             current_tr)
+    #         if j == i + 1:
+    #             pose_graph.edges.append(
+    #                 o3d.pipelines.registration.PoseGraphEdge(i,
+    #                                                          j,
+    #                                                          current_tr,
+    #                                                          information_icp,
+    #                                                          uncertain=False))
+    #         else:
+    #             pose_graph.edges.append(
+    #                 o3d.pipelines.registration.PoseGraphEdge(i,
+    #                                                          j,
+    #                                                          current_tr,
+    #                                                          information_icp,
+    #                                                          uncertain=True))
+    # print()
+    # option = o3d.pipelines.registration.GlobalOptimizationOption(
+    #     max_correspondence_distance=dis,
+    #     edge_prune_threshold=0.9,
+    #     reference_node=0)
+    # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+    #     o3d.pipelines.registration.global_optimization(
+    #         pose_graph, o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
+    #         o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(), option)
+    # tr_matrices = []
+    # for node in pose_graph.nodes:
+    #     tr_matrices.append(node.pose)
+    return tr_matrices
+
+# def full_pc_registration(full_pc_list):
+#     voxel_down_sampled_full_pc_list = []
+#     for full_pc in full_pc_list:
+#         voxel_down_sampled_full_pc = full_pc.voxel_down_sample(voxel_size=0.3)
+#         voxel_down_sampled_full_pc.estimate_normals(
+#             search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
+#         voxel_down_sampled_full_pc.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
+#         voxel_down_sampled_full_pc_list.append(voxel_down_sampled_full_pc)
+#         print(f"Downsampled {len(voxel_down_sampled_full_pc.points)} points from {len(full_pc.points)}, frame {len(voxel_down_sampled_full_pc_list)}")
+#     pose_graph, dis = full_registration(voxel_down_sampled_full_pc_list)
+#     option = o3d.pipelines.registration.GlobalOptimizationOption(
+#         max_correspondence_distance=dis,
+#         edge_prune_threshold=0.9,
+#         reference_node=0)
+#     with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+#         o3d.pipelines.registration.global_optimization(
+#             pose_graph, o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
+#             o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(), option)
+#     tr_matrices = []
+#     for node in pose_graph.nodes:
+#         tr_matrices.append(node.pose)
+#     return tr_matrices

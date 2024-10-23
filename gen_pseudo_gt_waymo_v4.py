@@ -50,7 +50,7 @@ def dbscan_max_cluster(pcd):
 
 def dbscan_per_frame_instance(instance_frame_pcd):
     dis = np.mean(np.linalg.norm(instance_frame_pcd, axis=1))
-    dis = dis * (0.3 * np.pi / 180) * 2.5
+    dis = dis * (0.3 * np.pi / 180) * 3.0
     src = open3d.geometry.PointCloud()
     src.points = open3d.utility.Vector3dVector(instance_frame_pcd)
     src.paint_uniform_color([1, 0.706, 0])
@@ -268,14 +268,11 @@ def main(args):
         src = open3d.geometry.PointCloud()
         src.points = open3d.utility.Vector3dVector(full_pc)
         full_pc_list.append(src)
-    world_transformation_matrices = full_pc_registration(full_pc_list)
-    inv_world_transformation_matrices = [np.linalg.inv(tr) for tr in world_transformation_matrices]
-
+    pose_graph = full_pc_registration(full_pc_list)
+    world_transformation_matrices = [np.eye(4) for _ in range(np.max(args.rgs_end_idx) + 1)]
     for i, frame_idx in enumerate(idx_range):
-        src = o3d.geometry.PointCloud()
-        src.points = open3d.utility.Vector3dVector(pcd_list[i])
-        src = src.transform(world_transformation_matrices[i])
-        pcd_list[i] = np.array(src.points)
+        world_transformation_matrices[frame_idx] = pose_graph[i]
+    inv_world_transformation_matrices = [np.linalg.inv(tr) for tr in world_transformation_matrices]
     #############################################################################
 
     ########################## Load instance, frame pcds ########################
@@ -290,7 +287,7 @@ def main(args):
             if len(instance_frame_pcd) == 0:
                 continue
 
-            instance_frame_pcd_list[instance_id][frame_idx]["before_dbscan"] = transform_np_points(instance_frame_pcd, inv_world_transformation_matrices[j])
+            instance_frame_pcd_list[instance_id][frame_idx]["before_dbscan"] = instance_frame_pcd
 
             instance_pcd_color_list[instance_id] = instance_frame_pcd_color[0]
 
@@ -300,7 +297,7 @@ def main(args):
             if len(instance_frame_pcd) == 0:
                 continue
 
-            instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = transform_np_points(instance_frame_pcd, inv_world_transformation_matrices[j])
+            instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan"] = instance_frame_pcd
             instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_frame_pcd_color[0]
 
             instance_pcd_list[instance_id][frame_idx] = instance_frame_pcd
@@ -318,7 +315,7 @@ def main(args):
     #############################################################################
 
     ########################## Dynamic Object Recognition ########################
-    dynamic_instance_id_list, static_instance_id_list = find_dynamic_objects(instance_pcd_list, unique_instance_id_list, idx_range, args)
+    dynamic_instance_id_list, static_instance_id_list = find_dynamic_objects(world_transformation_matrices, instance_pcd_list, unique_instance_id_list, idx_range, args)
     ##############################################################################
 
     ######################### Sparse Instance ########################
@@ -327,10 +324,10 @@ def main(args):
     for instance_id in unique_instance_id_list:
         for j, frame_idx in enumerate(idx_range):
             if frame_idx in instance_pcd_list[instance_id].keys():
-                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan_id_merge"] = transform_np_points(instance_pcd_list[instance_id][frame_idx], inv_world_transformation_matrices[j])
+                instance_frame_pcd_list[instance_id][frame_idx]["after_dbscan_id_merge"] = instance_pcd_list[instance_id][frame_idx]
                 instance_frame_pcd_list[instance_id][frame_idx]["color"] = instance_pcd_color_list[instance_id]
                 pcd = instance_pcd_list[instance_id][frame_idx]
-                if len(pcd) <= 100 or np.mean(np.linalg.norm(transform_np_points(pcd, inv_world_transformation_matrices[frame_idx - args.rgs_start_idx]), axis=1)) > 50.0:
+                if len(pcd) <= 100 or np.mean(np.linalg.norm(pcd, axis=1)) > 50.0:
                     sparse_instance_pcd_list[instance_id][frame_idx] = pcd
                     continue
                 new_instance_pcd_list[instance_id][frame_idx] = pcd
@@ -401,7 +398,7 @@ def main(args):
         for i, frame_idx in enumerate(dynamic_instance_pcd_frame_idx_list):
             bbox = copy.deepcopy(line_set_lidar)
             t_bbox = copy.deepcopy(t_line_set_lidar)
-            tr_matrix = get_valid_transformations(dynamic_transformation_list[i] @ inv_world_transformation_matrices[center_idx] @ world_transformation_matrices[frame_idx - args.rgs_start_idx], line_set_lidar)
+            tr_matrix = get_valid_transformations(dynamic_transformation_list[i], line_set_lidar)
             bbox = bbox.transform(tr_matrix)
             t_bbox = t_bbox.transform(tr_matrix)
             instance_bounding_box_list[dynamic_instance_id][frame_idx] = bbox
@@ -409,13 +406,12 @@ def main(args):
 
         for frame_idx in sparse_instance_pcd_list[dynamic_instance_id].keys():
             bbox_size = np.array(gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method, only_size=True))
-            ry = gen_bbox(copy.deepcopy(dynamic_registered_src).transform(inv_world_transformation_matrices[center_idx]), args.bbox_gen_fit_method, only_angle=True)
+            ry = gen_bbox(dynamic_registered_src, args.bbox_gen_fit_method, only_angle=True)
             nearest_i = np.argmin(np.abs(np.array(dynamic_instance_pcd_frame_idx_list) - frame_idx))
-            prev_direction = get_valid_transformations(dynamic_transformation_list[nearest_i] @ inv_world_transformation_matrices[center_idx] @ world_transformation_matrices[frame_idx - args.rgs_start_idx], line_set_lidar, get_rotation=True)
+            prev_direction = get_valid_transformations(dynamic_transformation_list[nearest_i], line_set_lidar, get_rotation=True)
             src = open3d.geometry.PointCloud()
             src.points = open3d.utility.Vector3dVector(sparse_instance_pcd_list[dynamic_instance_id][frame_idx])
             src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
-            src.transform(inv_world_transformation_matrices[frame_idx - args.rgs_start_idx])
             this_bbox, init_line = locate_bbox(src, bbox_size, prev_direction + ry, give_initial_box=True)
             if this_bbox is None:
                 continue
@@ -445,10 +441,12 @@ def main(args):
         for frame_idx in idx_range:
             if frame_idx in instance_pcd_list[static_instance_id].keys():
                 pcd = instance_pcd_list[static_instance_id][frame_idx]
+                pcd = transform_np_points(pcd, world_transformation_matrices[frame_idx])
                 static_registered_pcd.extend(pcd)
                 ptr = frame_idx
             if frame_idx in sparse_instance_pcd_list[static_instance_id].keys():
                 pcd = sparse_instance_pcd_list[static_instance_id][frame_idx]
+                pcd = transform_np_points(pcd, world_transformation_matrices[frame_idx])
                 static_registered_pcd.extend(pcd)
                 ptr = frame_idx
 
@@ -479,8 +477,8 @@ def main(args):
         registration_data_list[static_instance_id]['line_set_lidar'] = line_set_lidar
         registration_data_list[static_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
-        gt_lines = find_gtbbox(copy.deepcopy(static_src).transform(world_transformation_matrices[ptr - args.rgs_start_idx]), ptr)
-        registration_data_list[static_instance_id]['gt_lines'] = copy.deepcopy(gt_lines).transform(inv_world_transformation_matrices[ptr - args.rgs_start_idx])
+        gt_lines = find_gtbbox(copy.deepcopy(static_src).transform(world_transformation_matrices[ptr]), ptr)
+        registration_data_list[static_instance_id]['gt_lines'] = copy.deepcopy(gt_lines).transform(inv_world_transformation_matrices[ptr])
 
         for i, frame_idx in enumerate(idx_range):
             bbox = copy.deepcopy(line_set_lidar)
@@ -495,6 +493,13 @@ def main(args):
         ##############################################################################
 
     if args.vis:
+        import pickle
+        output_dir = f'./output/scene-{args.scene_idx}'
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        with open(f'./{output_dir}/world_transformation_matrices.pkl', 'wb') as f:
+            pickle.dump(world_transformation_matrices, f)
+
         visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, idx_range, args)
 
 if __name__ == "__main__":
@@ -507,11 +512,11 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=32222)
+    parser.add_argument('--scene_idx', type=int,default=3)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=197)
+    parser.add_argument('--rgs_end_idx',type=int, default=100)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)
