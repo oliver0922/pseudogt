@@ -24,6 +24,8 @@ AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin
 LIDAR_TO_CAMERA = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
+
+
 def dbscan(pcd):
     dis = np.mean(np.linalg.norm(np.array(pcd.points), axis=1))
     dis = dis * (0.3 * np.pi / 180) * 2.0
@@ -74,7 +76,7 @@ def find_gtbbox(target_src, frame_idx):
         if distance < min_distace:
             min_distace = distance
             min_idx = i
-    line_set_gt, _ = BoundingBox.load_gt(gt_bbox_file[min_idx]).get_o3d_instance()
+    line_set_gt, _ = BoundingBox().load_gt(gt_bbox_file[min_idx]).get_o3d_instance()
     line_set_gt.paint_uniform_color([0, 0, 1])
     return line_set_gt
 
@@ -104,7 +106,7 @@ def pcd_face_detection(pcd):
     normal_angles = np.arctan2(normals[:, 1], normals[:, 0])
 
 
-    box_angle = BoundingBox(pcd, 'point_normal').r
+    box_angle = BoundingBox().make_box(pcd, 'point_normal').r
     # count angles near box angle, box angle + pi/2, box angle + pi, box angle + 3pi/2
     angle_list = [box_angle, box_angle + np.pi/2, box_angle + np.pi, box_angle + 3*np.pi/2]
     angle_list = np.array(angle_list)
@@ -122,26 +124,26 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
     # Given camera location(0, 0, 0), we can find bbox face visible at camera
     # we are going to extend invisible bbox face to fit the bbox size
     # prev_direction is given to find long side of bbox
-    obj = BoundingBox(pcd, 'point_normal')
+    obj = BoundingBox().make_box(pcd, 'point_normal')
     # if diff between prev_direction and bbox direction is near 90 degree or 270 degree, we need to add or sub 90 degree
     # check near 90 degree or 270 degree
     if np.abs(np.abs(obj.r - prev_direction) - np.pi/2) < np.pi/6 or np.abs(np.abs(obj.r - prev_direction) - 3*np.pi/2) < np.pi/6:
         if np.abs(obj.r - prev_direction) < np.pi/2:
             obj.r += np.pi/2
-            obj.extent = np.array([obj.extent[1], obj.extent[0], obj.extent[2]])
+            obj.s = np.array([obj.s[1], obj.s[0], obj.s[2]])
         else:
             obj.r -= np.pi/2
-            obj.extent = np.array([obj.extent[1], obj.extent[0], obj.extent[2]])
+            obj.s = np.array([obj.s[1], obj.s[0], obj.s[2]])
 
     obj_cp = copy.deepcopy(obj)
     # degree part is done, now we need to find bbox face visible at camera
     # we can find bbox face visible at camera by checking bbox face normal direction dot camera to face center direction
     
     # find bbox face visible at camera
-    face_centers = np.array([[obj.t[0] + obj.extent[0]/2 * np.cos(obj.r), obj.t[1] + obj.extent[0]/2 * np.sin(obj.r)],
-                            [obj.t[0] + obj.extent[1]/2 * np.cos(obj.r + np.pi/2), obj.t[1] + obj.extent[1]/2 * np.sin(obj.r + np.pi/2)],
-                            [obj.t[0] + obj.extent[0]/2 * np.cos(obj.r + np.pi), obj.t[1] + obj.extent[0]/2 * np.sin(obj.r + np.pi)],
-                            [obj.t[0] + obj.extent[1]/2 * np.cos(obj.r + 3*np.pi/2), obj.t[1] + obj.extent[1]/2 * np.sin(obj.r + 3*np.pi/2)]])
+    face_centers = np.array([[obj.t[0] + obj.s[0]/2 * np.cos(obj.r), obj.t[1] + obj.s[0]/2 * np.sin(obj.r)],
+                            [obj.t[0] + obj.s[1]/2 * np.cos(obj.r + np.pi/2), obj.t[1] + obj.s[1]/2 * np.sin(obj.r + np.pi/2)],
+                            [obj.t[0] + obj.s[0]/2 * np.cos(obj.r + np.pi), obj.t[1] + obj.s[0]/2 * np.sin(obj.r + np.pi)],
+                            [obj.t[0] + obj.s[1]/2 * np.cos(obj.r + 3*np.pi/2), obj.t[1] + obj.s[1]/2 * np.sin(obj.r + 3*np.pi/2)]])
     dot_product = np.sum((face_centers - obj.t[:2]) * face_centers, axis=1)
 
     face_centers_with_z = np.array([[face_centers[0, 0], face_centers[0, 1], obj.t[2]],
@@ -156,12 +158,12 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
         if vis[0] or vis[2]:
             direction = (obj.t[:2] - face_centers[vis])
             normalized_direction = direction / np.linalg.norm(direction)
-            l = bbox_size[0] / 2 - obj.extent[0] / 2
+            l = bbox_size[0] / 2 - obj.s[0] / 2
             obj.t[:2] += (normalized_direction * l).reshape(-1)
         else:
             direction = (obj.t[:2] - face_centers[vis])
             normalized_direction = direction / np.linalg.norm(direction)
-            l = bbox_size[1] / 2 - obj.extent[1] / 2
+            l = bbox_size[1] / 2 - obj.s[1] / 2
             obj.t[:2] += (normalized_direction * l).reshape(-1)
     elif np.sum(invis) == 2:
         cor = np.sum(face_centers[vis], axis=0) - obj.t[:2]
@@ -172,17 +174,17 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
             ind1, ind2 = indices[1], indices[0]
         dir1 = face_centers[ind1] - cor
         dir2 = face_centers[ind2] - cor
-        dir1 = dir1 / np.linalg.norm(dir1) * (bbox_size[1] / 2 - obj.extent[1] / 2)
-        dir2 = dir2 / np.linalg.norm(dir2) * (bbox_size[0] / 2 - obj.extent[0] / 2)
+        dir1 = dir1 / np.linalg.norm(dir1) * (bbox_size[1] / 2 - obj.s[1] / 2)
+        dir2 = dir2 / np.linalg.norm(dir2) * (bbox_size[0] / 2 - obj.s[0] / 2)
         obj.t[:2] = obj.t[:2] + dir1 + dir2
     else:
         if give_initial_box:
             return None, None
         return None
 
-    obj.extent = bbox_size
+    obj.s = bbox_size
     if give_initial_box:
-        line_set, _ = BoundingBox(pcd, 'point_normal').get_o3d_instance()
+        line_set, _ = BoundingBox().make_box(pcd, 'point_normal').get_o3d_instance()
         return copy.deepcopy(obj), line_set
     return copy.deepcopy(obj)
     
@@ -190,7 +192,7 @@ def locate_bbox(pcd, bbox_size, prev_direction, give_initial_box=False):
 
 def main(args):
     idx_range = range(args.rgs_start_idx, args.rgs_end_idx+1)
-    save_data = Save_PseudoGT(f'./output/', f'scene-{args.scene_idx}_pseudo_gt.pkl')
+    save_data = Save_PseudoGT(f'./output/', f'scene-{args.scene_idx}/pseudo_gt.pkl')
 
     pcd_list = []
     pcd_color_list = []
@@ -334,7 +336,6 @@ def main(args):
     registration_data_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     sparse_bbox_data_list = [[{} for _ in range(np.max(idx_range) + 1)] for _ in range(np.max(unique_instance_id_list) + 1)]
     instance_bounding_box_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
-    t_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     sparse_bbox_list = [{} for _ in range(np.max(unique_instance_id_list) + 1)]
     for dynamic_instance_id in unique_instance_id_list:
         print(f"Dynamic instance id: {dynamic_instance_id}")
@@ -366,6 +367,10 @@ def main(args):
                 dynamic_instance_src_list.append(pcd)
                 dynamic_instance_pcd_frame_idx_list.append(frame_idx)
                 ptr += 1
+
+        if len(dynamic_registered_pcd) == 0:
+            continue
+
         dynamic_registered_src = open3d.geometry.PointCloud()
         dynamic_registered_src.points = open3d.utility.Vector3dVector(dynamic_registered_pcd)
         dynamic_registered_src.paint_uniform_color(instance_pcd_color_list[dynamic_instance_id])
@@ -377,36 +382,36 @@ def main(args):
             else:
                 dynamic_registered_src = dbscan(dynamic_registered_src)
 
-        line_set_lidar, _ = BoundingBox(dynamic_registered_src, args.bbox_gen_fit_method).get_o3d_instance()
-        t_line_set_lidar, _ = BoundingBox(dynamic_registered_src, 'closeness_to_edge').get_o3d_instance()
+        dynamic_obj = BoundingBox().make_box(dynamic_registered_src, args.bbox_gen_fit_method)
+        line_set_lidar, _ = dynamic_obj.get_o3d_instance()
 
         if line_set_lidar is None:
             continue
 
         if dynamic_instance_id in dynamic_instance_id_list:
             line_set_lidar.paint_uniform_color([1, 0, 0])
-            t_line_set_lidar.paint_uniform_color([0, 1, 0])
         else:
             line_set_lidar.paint_uniform_color([0.6, 0.3, 0.6])
-            t_line_set_lidar.paint_uniform_color([0.3, 0.6, 0.6])
 
         registration_data_list[dynamic_instance_id]['line_set_lidar'] = line_set_lidar
-        registration_data_list[dynamic_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
         gt_lines = find_gtbbox(dynamic_registered_src, dynamic_instance_pcd_frame_idx_list[center_idx])
         registration_data_list[dynamic_instance_id]['gt_lines'] = gt_lines
 
         for i, frame_idx in enumerate(dynamic_instance_pcd_frame_idx_list):
-            bbox = copy.deepcopy(line_set_lidar)
-            t_bbox = copy.deepcopy(t_line_set_lidar)
-            tr_matrix = get_valid_transformations(dynamic_transformation_list[i], line_set_lidar)
-            bbox = bbox.transform(tr_matrix)
-            t_bbox = t_bbox.transform(tr_matrix)
+            obj = copy.deepcopy(dynamic_obj)
+            obj = obj.transform(dynamic_transformation_list[i])
+            bbox, _ = obj.get_o3d_instance()
+            if dynamic_instance_id in dynamic_instance_id_list:
+                bbox.paint_uniform_color([1, 0, 0])
+            else:
+                bbox.paint_uniform_color([0.6, 0.3, 0.6])
+
             instance_bounding_box_list[dynamic_instance_id][frame_idx] = bbox
-            t_bbox_list[dynamic_instance_id][frame_idx] = t_bbox
+            save_data.add_bbox(dynamic_instance_id, frame_idx, obj.get_np_instance())
 
         for frame_idx in sparse_instance_pcd_list[dynamic_instance_id].keys():
-            bbox = BoundingBox(dynamic_registered_src, args.bbox_gen_fit_method)
+            bbox = copy.deepcopy(dynamic_obj)
             bbox_size = bbox.s
             ry = bbox.r
             nearest_i = np.argmin(np.abs(np.array(dynamic_instance_pcd_frame_idx_list) - frame_idx))
@@ -431,6 +436,8 @@ def main(args):
             sparse_bbox_data_list[dynamic_instance_id][frame_idx]['nearest_bbox'] = instance_bounding_box_list[dynamic_instance_id][dynamic_instance_pcd_frame_idx_list[nearest_i]]
             sparse_bbox_data_list[dynamic_instance_id][frame_idx]['nearest_registered_idx'] = dynamic_instance_pcd_frame_idx_list[nearest_i]
             sparse_bbox_data_list[dynamic_instance_id][frame_idx]['nearest_i'] = nearest_i
+
+            save_data.add_bbox(dynamic_instance_id, frame_idx, this_bbox.get_np_instance())
 
         print(f"Dynamic instance {dynamic_instance_id} is done")
     ##############################################################################
@@ -469,42 +476,36 @@ def main(args):
             else:
                 static_src = dbscan(static_src)
 
-        line_set_lidar, _ = BoundingBox(static_src, args.bbox_gen_fit_method).get_o3d_instance()
-        t_line_set_lidar, _ = BoundingBox(static_src, 'closeness_to_edge').get_o3d_instance()
+        static_obj = BoundingBox().make_box(static_src, args.bbox_gen_fit_method)
+        line_set_lidar, _ = static_obj.get_o3d_instance()
+        save_data.add_static_bbox(static_instance_id, static_obj.get_np_instance())
 
         if line_set_lidar is None:
             continue
 
         line_set_lidar.paint_uniform_color([1, 0, 0.706])
-        t_line_set_lidar.paint_uniform_color([0, 1, 0.706])
         registration_data_list[static_instance_id]['line_set_lidar'] = line_set_lidar
-        registration_data_list[static_instance_id]['t_line_set_lidar'] = t_line_set_lidar
 
         gt_lines = find_gtbbox(copy.deepcopy(static_src).transform(world_transformation_matrices[ptr]), ptr)
         registration_data_list[static_instance_id]['gt_lines'] = copy.deepcopy(gt_lines).transform(inv_world_transformation_matrices[ptr])
 
         for i, frame_idx in enumerate(idx_range):
-            bbox = copy.deepcopy(line_set_lidar)
-            tr_matrix = get_valid_transformations(world_transformation_matrices[i], line_set_lidar)
-            bbox = bbox.transform(tr_matrix)
-            bbox.paint_uniform_color([0.666, 0.666, 0.666])
+            obj = copy.deepcopy(static_obj).transform(world_transformation_matrices[frame_idx])
+            bbox, _ = obj.get_o3d_instance()
+            bbox.paint_uniform_color([0.333, 0.333, 0.333])
             static_bbox_list[static_instance_id][frame_idx] = bbox
 
         print(f"Static instance {static_instance_id} is done")
         ##############################################################################
+    save_data.add_id_merge_data(corr)
+    save_data.save()
 
     if args.vis:
-        import pickle
-        output_dir = f'./output/scene-{args.scene_idx}'
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        with open(f'./{output_dir}/world_transformation_matrices.pkl', 'wb') as f:
-            pickle.dump(world_transformation_matrices, f)
-
-        visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, static_bbox_list, idx_range, args)
-
+        #visualizer(instance_bounding_box_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, static_bbox_list, idx_range, args)
+        pass
+        
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='pseudo bounding generation ')
+    parser = argparse.ArgumentParser(description='pseudo bounding generation')
     parser.add_argument('--dataset_path', type=str, default='/workspace/3df_data/waymo_sam2')
     parser.add_argument('--visible_bbox_estimation', type=bool, default=True)
     parser.add_argument('--perform_db_scan_before_registration', type=bool, default=True)
@@ -513,11 +514,11 @@ if __name__ == "__main__":
     parser.add_argument('--pca', type=bool, default=True)
     parser.add_argument('--orient', type=bool, default=True)
     parser.add_argument('--vis', type=bool, default=True)
-    parser.add_argument('--scene_idx', type=int,default=678)
+    parser.add_argument('--scene_idx', type=int,default=3)
     parser.add_argument('--src_frame_idx', type=int, default=0)
     parser.add_argument('--tgt_frame_idx', type=int, default=0)
     parser.add_argument('--rgs_start_idx',type=int, default=0)
-    parser.add_argument('--rgs_end_idx',type=int, default=198)
+    parser.add_argument('--rgs_end_idx',type=int, default=10)
     parser.add_argument('--origin',type=bool, default=False)
     parser.add_argument('--clustering',type=str, default='dbscan')
     parser.add_argument('--dbscan_each_instance', type=bool, default=False)
@@ -542,21 +543,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.origin:
-        source = np.fromfile(os.path.join(args.dataset_path,f'scene-{args.scene_idx}','pointcloud',f'{str(args.src_frame_idx).zfill(6)}.bin'), dtype=np.float32).reshape(-1, 3)
-
-        src = open3d.geometry.PointCloud()
-        src.points = open3d.utility.Vector3dVector(source[:, :3])
-        src.paint_uniform_color([1, 0.706, 0])
-        vis = open3d.visualization.Visualizer()
-        vis.create_window()
-
-        vis.get_render_option().point_size = 1.0
-        vis.get_render_option().background_color = np.ones(3)
-
-
-        vis.add_geometry(AXIS_PCD)
-        vis.add_geometry(src)
-        vis.run()
     
     main(args)

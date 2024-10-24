@@ -4,21 +4,20 @@ import numpy as np
 import os
 import argparse
 import copy
-from utils.utils import translate_boxes_to_open3d_gtbox
 from utils.open3d_utils import set_black_background, set_white_background
+from utils.bounding_box_utils import BoundingBox
 
 
 AXIS_PCD = open3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 
 class Frame_Visualizer:
     def __init__(self, frame_idx, instance_frame_pcd_list, unique_instance_id_list, \
-                 instance_bounding_box_list, t_bbox_list, sparse_bbox_list, sparse_bbox_data_list, \
+                 instance_bounding_box_list, sparse_bbox_list, sparse_bbox_data_list, \
                     static_bbox_list, args):
         self.frame_idx = frame_idx
         self.instance_frame_pcd_list = instance_frame_pcd_list
         self.unique_instance_id_list = unique_instance_id_list
         self.instance_bounding_box_list = instance_bounding_box_list
-        self.t_bbox_list = t_bbox_list
         self.sparse_bbox_list = sparse_bbox_list
         self.sparse_bbox_data_list = sparse_bbox_data_list
         self.static_bbox_list = static_bbox_list
@@ -30,8 +29,6 @@ class Frame_Visualizer:
         for instance_id in self.unique_instance_id_list:
             if self.frame_idx in self.instance_bounding_box_list[instance_id].keys():
                 load_list.append(self.instance_bounding_box_list[instance_id][self.frame_idx])
-            if self.frame_idx in self.t_bbox_list[instance_id].keys():
-                load_list.append(self.t_bbox_list[instance_id][self.frame_idx])
             if self.frame_idx in self.sparse_bbox_list[instance_id].keys():
                 load_list.append(self.sparse_bbox_list[instance_id][self.frame_idx])
                 load_list.append(self.sparse_bbox_data_list[instance_id][self.frame_idx]["init_line"])
@@ -44,7 +41,7 @@ class Frame_Visualizer:
         gt_bbox = np.fromfile(os.path.join(self.args.dataset_path,f'scene-{self.args.scene_idx}','annotations',f'{str(self.frame_idx).zfill(6)}.bin')).reshape(-1, 7)
         gt_list = []
         for i in range(len(gt_bbox)):
-            line_gt, _ = translate_boxes_to_open3d_gtbox(gt_bbox[i])
+            line_gt, _ = BoundingBox().load_gt(gt_bbox[i]).get_o3d_instance()
             line_gt.paint_uniform_color([0, 0, 1])
             gt_list.append(line_gt)
         src = open3d.geometry.PointCloud()
@@ -156,7 +153,6 @@ class Registered_Instance_Visualizer:
         load_list = []
         load_list.append(self.registration_data_list[self.instance_id]["registered_src"])
         load_list.append(self.registration_data_list[self.instance_id]["line_set_lidar"])
-        load_list.append(self.registration_data_list[self.instance_id]["t_line_set_lidar"])
         load_list.append(self.registration_data_list[self.instance_id]["gt_lines"])
         return load_list
     
@@ -292,7 +288,7 @@ class Instance_Visualizer:
             for load in loads:
                 vis.add_geometry(load)
             vis.update_renderer()
-            print(f"frame_idx: {self.frame_idx}, {len(load[1].points)} points")
+            print(f"frame_idx: {self.frame_idx}, {len(loads[1].points)} points")
         return vis_next_frame
     
     def vis_prev_frame(self):
@@ -306,7 +302,7 @@ class Instance_Visualizer:
             for load in loads:
                 vis.add_geometry(load)
             vis.update_renderer()
-            print(f"frame_idx: {self.frame_idx}, {len(load[1].points)} points")
+            print(f"frame_idx: {self.frame_idx}, {len(loads[1].points)} points")
         return vis_prev_frame
     
     def toggle_show_before_dbscan(self):
@@ -333,7 +329,7 @@ class Instance_Visualizer:
             print(f"show_before_dbscan: {self.show_before_dbscan}, {len(loads[1].points)} points")
         return toggle_show_before_dbscan
 
-def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, static_bbox_list, idx_range, args):
+def visualizer(instance_bounding_box_list, sparse_bbox_list, unique_instance_id_list, registration_data_list, sparse_bbox_data_list, instance_frame_pcd_list, merge_distance_data, static_bbox_list, idx_range, args):
     while True:
         menu_option = input("1. Visualize specific frame\n2. Visualize registered instance\n3. Visualize sparse instance by frame\n4. Visualize instance by frame\n5. Show instance ID list\n6. Print merge distance data\n7. Exit\n")
         if menu_option == "1":
@@ -342,7 +338,7 @@ def visualizer(instance_bounding_box_list, t_bbox_list, sparse_bbox_list, unique
                 print("Invalid frame index")
                 continue
             frame_idx = int(frame_idx)
-            frame_vis = Frame_Visualizer(frame_idx, instance_frame_pcd_list, unique_instance_id_list, instance_bounding_box_list, t_bbox_list, sparse_bbox_list, sparse_bbox_data_list, static_bbox_list, args)
+            frame_vis = Frame_Visualizer(frame_idx, instance_frame_pcd_list, unique_instance_id_list, instance_bounding_box_list, sparse_bbox_list, sparse_bbox_data_list, static_bbox_list, args)
             frame_vis.visualize()
 
         elif menu_option == "2":

@@ -1,7 +1,7 @@
 import numpy as np
 import open3d as o3d
 
-from utils.utils import translate_boxes_to_open3d_instance2 as translate_boxes_to_open3d_instance
+from utils.bounding_box_utils import BoundingBox
 import copy
 
 def pairwise_registration(source, target, initial, near):
@@ -49,8 +49,8 @@ def pairwise_registration(source, target, initial, near):
     if near:
         gt_box = np.array(np.concatenate((np.mean(np.array(source.points), axis=0), np.array([dis, dis, dis, 0]))))
         gt_box2 = np.array(np.concatenate((np.mean(np.array(target.points), axis=0), np.array([dis/6, dis/6, dis/6, 0]))))
-        line_set1, box1 = translate_boxes_to_open3d_instance(gt_box)
-        line_set2, box2 = translate_boxes_to_open3d_instance(gt_box2)
+        line_set1, box1 = BoundingBox.from_gt(gt_box).get_o3d_instance()
+        line_set2, box2 = BoundingBox.from_gt(gt_box2).get_o3d_instance()
         src1 = copy.deepcopy(source)
         src2 = copy.deepcopy(target)
         src1.paint_uniform_color([1, 0, 0])

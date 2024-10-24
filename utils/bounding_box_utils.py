@@ -1,55 +1,60 @@
+import copy
 import numpy as np
 import open3d as o3d
+from scipy.spatial.transform import Rotation as R
+
+lidar_to_camera = np.array([[0, -1, 0],[0, 0, -1],[1,0,0]])
 
 class BoundingBox:
-    def __init__(self, t, s, r):
+    def __init__(self, t=np.array([0,0,0]), s=np.array([0,0,0]), r=0):
         self.t = t
         self.s = s
         self.r = r
 
-    def make_box(self, pcd, fit_method, lidar_to_camera, angle = None):
-        cam_coord_pcd = np.array(pcd.points) @ lidar_to_camera.T
+    def make_box(self, pcd, fit_method, angle = None):
+        pcd = np.array(pcd.points)
+        cam_coord_pcd = pcd @ lidar_to_camera.T
         if len(cam_coord_pcd) == 0:
             return None, None
         if fit_method == 'closeness_to_edge':
-            corners, ry, area = closeness_rectangle(pcd[:, [0, 2]])
+            corners, ry, area = closeness_rectangle(cam_coord_pcd[:, [0, 2]])
         elif fit_method == 'point_normal':
             src = o3d.geometry.PointCloud()
-            src.points = o3d.utility.Vector3dVector(pcd)
+            src.points = o3d.utility.Vector3dVector(cam_coord_pcd)
             src.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=50))
             src.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
             corners, ry, area = point_normal_rectangle(src)
         elif fit_method == 'given_angle':
             if angle is None:
                 raise ValueError('angle is None')
-            corners, ry, area = given_angle_bbox_fit(pcd, angle)
+            corners, ry, area = given_angle_bbox_fit(cam_coord_pcd, angle)
         else:
             raise NotImplementedError(fit_method)
         ry *= -1
         l = np.linalg.norm(corners[0] - corners[1])
         w = np.linalg.norm(corners[0] - corners[-1])
         c = (corners[0] + corners[2]) / 2
-        bottom = pcd[:, 1].max()
+        bottom = cam_coord_pcd[:, 1].max()
         # bottom = get_lowest_point_rect(full_ptc, c, l, w, ry)
-        h = bottom - pcd[:, 1].min()
+        h = bottom - cam_coord_pcd[:, 1].min()
 
         self.t = np.array([c[0], bottom, c[1]])
-        self.t = lidar_to_camera.T @ self
-        self.s = np.array([l, h, w])
+        self.t = lidar_to_camera.T @ self.t
+        self.s = np.array([l, w, h])
         self.r = np.pi / 2 - ry
         return self
     
     def load_gt(self, arr):
         self.t = arr[:3]
-        self.t[2] = self.t[2] - self.s[2] / 2
         self.s = arr[3:6]
+        self.t[2] -= self.s[2] / 2
         self.r = arr[6]
         self.lidar_coord = True
         return self
     
     def get_o3d_instance(self):
-        center = self.t
-        self.t[2] = self.t[2] + self.s[2] / 2
+        center = copy.deepcopy(self.t)
+        center[2] = center[2] + self.s[2] / 2
         lwh = self.s
         axis_angles = np.array([0, 0, self.r + 1e-10])
         rot = o3d.geometry.get_rotation_matrix_from_axis_angle(axis_angles)
@@ -66,6 +71,17 @@ class BoundingBox:
     
     def get_np_instance(self):
         return np.concatenate((self.t, self.s, [self.r]), axis=0)
+
+    def transform(self, transformation_matrix):
+        tr_matrix = np.linalg.inv(transformation_matrix)
+        new_tr_mat = np.eye(4)
+        rotation = np.arctan2(tr_matrix[1, 0], tr_matrix[0, 0])
+        new_tr_mat[:3, :3] = R.from_euler('z', rotation).as_matrix()
+        homo_t = np.concatenate((copy.deepcopy(self.t + [0, 0, self.s[2]/2]), [1]))
+        new_tr_mat[:3, 3] = (tr_matrix @ homo_t)[:3] - (new_tr_mat @ homo_t)[:3]
+        self.t = (new_tr_mat @ homo_t)[:3] - [0, 0, self.t[2]/2]
+        self.r += rotation
+        return self
 
 
 
