@@ -3,7 +3,42 @@ import open3d as o3d
 from utils.utils import transform_np_points
 from utils.registration_utils import fragmentized_full_registration, full_registration
 
+# previous code 
+# def find_dynamic_objects(world_transformation_matrices, instance_pcd_list, unique_instance_id_list, idx_range, args):
+#     dynamic_instance_id_list = []
+#     static_instance_id_list = []
+#     for instance_id in unique_instance_id_list:
+#         prev_center = None
+#         prev_frame_idx = None
+        
+#         diff_per_frame_sum = 0
+#         max_diff_per_frame = 0
 
+#         cnt = 0
+#         for frame_idx in idx_range:
+#             if frame_idx in instance_pcd_list[instance_id].keys():
+#                 cnt += 1
+#                 center = np.mean(transform_np_points(instance_pcd_list[instance_id][frame_idx], world_transformation_matrices[frame_idx]), axis=0)
+#                 if prev_center is not None:
+#                     diff_per_frame_sum += np.linalg.norm(center - prev_center) / (frame_idx - prev_frame_idx)
+#                     max_diff_per_frame = max(max_diff_per_frame, np.linalg.norm(center - prev_center) / (frame_idx - prev_frame_idx))
+#                 prev_center = center
+#                 prev_frame_idx = frame_idx
+#         if cnt <= 10:
+#             dynamic_instance_id_list.append(instance_id)
+#             print(f"Dynamic instance id: {instance_id}")
+#             continue
+#         average_diff_per_frame = diff_per_frame_sum / cnt
+#         if average_diff_per_frame > args.dynamic_threshold or max_diff_per_frame > args.dynamic_threshold_single:
+#             dynamic_instance_id_list.append(instance_id)
+#             print(f"Dynamic instance id: {instance_id}, average_diff_per_frame: {average_diff_per_frame}, max_diff_per_frame: {max_diff_per_frame}")
+#         else:
+#             static_instance_id_list.append(instance_id)
+#             print(f"Static instance id: {instance_id}, average_diff_per_frame: {average_diff_per_frame}, max_diff_per_frame: {max_diff_per_frame}")
+        
+#     return dynamic_instance_id_list, static_instance_id_list
+
+# new version using normal difference
 def find_dynamic_objects(world_transformation_matrices, instance_pcd_list, unique_instance_id_list, idx_range, args):
     dynamic_instance_id_list = []
     static_instance_id_list = []
@@ -24,7 +59,7 @@ def find_dynamic_objects(world_transformation_matrices, instance_pcd_list, uniqu
                     max_diff_per_frame = max(max_diff_per_frame, np.linalg.norm(center - prev_center) / (frame_idx - prev_frame_idx))
                 prev_center = center
                 prev_frame_idx = frame_idx
-        if cnt <= 1:
+        if cnt <= 10:
             dynamic_instance_id_list.append(instance_id)
             print(f"Dynamic instance id: {instance_id}")
             continue

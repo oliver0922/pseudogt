@@ -129,28 +129,36 @@ def fragmentized_full_registration(pcds, fragment_size, max_ptr_idx=0):
         pose, _ = full_registration(pcds[i:i+2])
         transformation_matrices.append(transformation_matrices[-1] @ pose.nodes[1].pose)
         print(f"Fragmentized Registration: {i + 1}/{len(pcds) - 1}", end="\r")
-    print()
     return transformation_matrices
 
 
 
-def frame_pairwise_registration(source, target):
-    dis = np.mean(np.linalg.norm(np.array(source.points), axis=1)) + np.mean(np.linalg.norm(np.array(target.points), axis=1))
-    dis *= 2
-    trans = np.mean(np.array(target.points), axis=0) - np.mean(np.array(source.points), axis=0)
-    init_transformation = np.eye(4)
-    init_transformation[:3, 3] = trans
+def frame_pairwise_registration(source, target, args):
+    source = copy.deepcopy(source)
+    target = copy.deepcopy(target)
+    # source.points = o3d.utility.Vector3dVector(np.array(source.points)[np.where(np.abs(np.array(source.points)[:, 2]) > args.z_threshold)])
+    # target.points = o3d.utility.Vector3dVector(np.array(target.points)[np.where(np.abs(np.array(target.points)[:, 2]) > args.z_threshold)])
+    source.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
+    target.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30))
+    source.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
+    target.orient_normals_towards_camera_location(np.array([0., 0., 0.]))
+    
+    dis = 0.5
     icp_coarse = o3d.pipelines.registration.registration_icp(
-        source, target, dis, init_transformation,
+        source, target, dis, np.eye(4),
         o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    #o3d.visualization.draw_geometries([copy.deepcopy(source).transform(icp_coarse.transformation), target])
     icp_fine = o3d.pipelines.registration.registration_icp(
-        source, target, dis / 4, icp_coarse.transformation,
+        source, target, dis / 6, icp_coarse.transformation,
         o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    #o3d.visualization.draw_geometries([copy.deepcopy(source).transform(icp_fine.transformation), target])
     return icp_fine.transformation
 
 
 
-def full_pc_registration(full_pc_list):
+def full_pc_registration(full_pc_list, args):
     voxel_down_sampled_full_pc_list = []
     for full_pc in full_pc_list:
         voxel_down_sampled_full_pc = full_pc.voxel_down_sample(voxel_size=0.3)
@@ -160,6 +168,16 @@ def full_pc_registration(full_pc_list):
         voxel_down_sampled_full_pc_list.append(voxel_down_sampled_full_pc)
         print(f"Downsampled {len(voxel_down_sampled_full_pc.points)} points from {len(full_pc.points)}, frame {len(voxel_down_sampled_full_pc_list)}")
     tr_matrices = fragmentized_full_registration(voxel_down_sampled_full_pc_list, 1)
+    
+    # new registration method
+    # tr_matrices = []
+    # tr_matrices.append(np.eye(4))
+    # for i in range(len(voxel_down_sampled_full_pc_list) - 1):
+    #     tr_matrices.append(frame_pairwise_registration(voxel_down_sampled_full_pc_list[i], voxel_down_sampled_full_pc_list[i + 1], args))
+    #     print(f"Pairwise Registration: {i + 1}/{len(voxel_down_sampled_full_pc_list) - 1}", end="\r")
+    # print()
+
+    # optimization codes
     # pose_graph = o3d.pipelines.registration.PoseGraph()
     # for i in range(len(tr_matrices)):
     #     pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(tr_matrices[i]))
@@ -196,7 +214,7 @@ def full_pc_registration(full_pc_list):
     #                                                          uncertain=True))
     # print()
     # option = o3d.pipelines.registration.GlobalOptimizationOption(
-    #     max_correspondence_distance=dis,
+    #     max_correspondence_distance=0.2,
     #     edge_prune_threshold=0.9,
     #     reference_node=0)
     # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
@@ -208,6 +226,7 @@ def full_pc_registration(full_pc_list):
     #     tr_matrices.append(node.pose)
     return tr_matrices
 
+# full registration on full pc
 # def full_pc_registration(full_pc_list):
 #     voxel_down_sampled_full_pc_list = []
 #     for full_pc in full_pc_list:
